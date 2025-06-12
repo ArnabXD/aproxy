@@ -3,12 +3,12 @@ package manager
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 	"sync"
 	"time"
 
 	"aproxy/internal/database"
+	"aproxy/internal/logger"
 	"aproxy/pkg/checker"
 	"aproxy/pkg/scraper"
 )
@@ -22,6 +22,7 @@ type DBManager struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
+	logger       *logger.Logger
 
 	// In-memory cache for fast access
 	cachedProxies []scraper.Proxy
@@ -48,28 +49,29 @@ func NewDBManager(db *database.DB, checkInterval time.Duration, backgroundEnable
 		cancel:            cancel,
 		cachedProxies:     make([]scraper.Proxy, 0),
 		backgroundEnabled: backgroundEnabled,
+		logger:            logger.New("manager"),
 	}
 }
 
 // Start begins the proxy manager operations with non-blocking startup
 func (m *DBManager) Start(updateInterval time.Duration) error {
-	log.Println("Starting database-backed proxy manager...")
+	m.logger.InfoBg("Starting database-backed proxy manager...")
 	m.updateInterval = updateInterval
 
 	// Load existing healthy proxies from database (fast, non-blocking)
 	if err := m.loadHealthyProxies(); err != nil {
-		log.Printf("Failed to load existing proxies: %v", err)
+		m.logger.WarnBg("Failed to load existing proxies: %v", err)
 	}
 
-	log.Printf("Database proxy manager started with %d cached proxies", len(m.cachedProxies))
+	m.logger.InfoBg("Database proxy manager started with %d cached proxies", len(m.cachedProxies))
 
 	// Start background operations if enabled
 	if m.backgroundEnabled {
-		log.Println("Starting background proxy operations...")
+		m.logger.InfoBg("Starting background proxy operations...")
 		
 		// Start background refresh immediately if we have no proxies
 		if len(m.cachedProxies) == 0 {
-			log.Println("No cached proxies found, starting immediate background refresh...")
+			m.logger.InfoBg("No cached proxies found, starting immediate background refresh...")
 			m.wg.Add(1)
 			go m.backgroundRefresh()
 		}
@@ -84,7 +86,7 @@ func (m *DBManager) Start(updateInterval time.Duration) error {
 		m.wg.Add(1)
 		go m.cacheRefreshLoop(cacheRefreshTicker)
 	} else {
-		log.Println("Background checking disabled, running initial refresh...")
+		m.logger.InfoBg("Background checking disabled, running initial refresh...")
 		// Fallback to blocking behavior if background is disabled
 		if err := m.RefreshProxies(); err != nil {
 			return fmt.Errorf("initial proxy refresh failed: %w", err)
@@ -96,7 +98,7 @@ func (m *DBManager) Start(updateInterval time.Duration) error {
 
 // Stop stops the proxy manager
 func (m *DBManager) Stop() {
-	log.Println("Stopping database proxy manager...")
+	m.logger.InfoBg("Stopping database proxy manager...")
 
 	if m.updateTicker != nil {
 		m.updateTicker.Stop()
@@ -105,12 +107,12 @@ func (m *DBManager) Stop() {
 	m.cancel()
 	m.wg.Wait()
 
-	log.Println("Database proxy manager stopped")
+	m.logger.InfoBg("Database proxy manager stopped")
 }
 
 // RefreshProxies scrapes new proxies and checks them with caching
 func (m *DBManager) RefreshProxies() error {
-	log.Println("Refreshing proxy list with database caching...")
+	m.logger.InfoBg("Refreshing proxy list with database caching...")
 
 	// Use manager's context to respect cancellation, but with timeout
 	ctx, cancel := context.WithTimeout(m.ctx, 10*time.Minute)
@@ -122,13 +124,13 @@ func (m *DBManager) RefreshProxies() error {
 		return fmt.Errorf("failed to scrape proxies: %w", err)
 	}
 
-	log.Printf("Scraped %d proxies, checking health with caching...", len(proxies))
+	m.logger.InfoBg("Scraped %d proxies, checking health with caching...", len(proxies))
 
 	// Use database-backed checker with caching and progressive updates
 	results := m.dbChecker.CheckProxiesWithCaching(ctx, proxies)
 	healthyProxies := checker.FilterHealthyProxies(results)
 
-	log.Printf("Found %d healthy proxies out of %d checked", len(healthyProxies), len(results))
+	m.logger.InfoBg("Found %d healthy proxies out of %d checked", len(healthyProxies), len(results))
 
 	// Update in-memory cache
 	m.mu.Lock()
@@ -138,25 +140,25 @@ func (m *DBManager) RefreshProxies() error {
 	newCount := len(m.cachedProxies)
 	m.mu.Unlock()
 
-	log.Printf("Updated proxy cache: %d -> %d healthy proxies", oldCount, newCount)
+	m.logger.InfoBg("Updated proxy cache: %d -> %d healthy proxies", oldCount, newCount)
 
 	// If we have healthy proxies now but had none before, reload from database as well
 	if oldCount == 0 && newCount > 0 {
-		log.Println("Cache was empty but now has proxies, reloading from database to include any existing healthy proxies")
+		m.logger.InfoBg("Cache was empty but now has proxies, reloading from database to include any existing healthy proxies")
 		if err := m.loadHealthyProxies(); err != nil {
-			log.Printf("Failed to reload from database: %v", err)
+			m.logger.WarnBg("Failed to reload from database: %v", err)
 		} else {
 			m.mu.RLock()
 			finalCount := len(m.cachedProxies)
 			m.mu.RUnlock()
-			log.Printf("Final cache count after database reload: %d proxies", finalCount)
+			m.logger.InfoBg("Final cache count after database reload: %d proxies", finalCount)
 		}
 	}
 
 	// Cleanup old proxies in the background
 	go func() {
 		if err := m.dbChecker.CleanupOldProxies(context.Background(), 24*time.Hour); err != nil {
-			log.Printf("Failed to cleanup old proxies: %v", err)
+			m.logger.WarnBg("Failed to cleanup old proxies: %v", err)
 		}
 	}()
 
@@ -176,7 +178,7 @@ func (m *DBManager) loadHealthyProxies() error {
 	m.currentIndex = 0
 	m.mu.Unlock()
 
-	log.Printf("Loaded %d healthy proxies from database", len(proxies))
+	m.logger.InfoBg("Loaded %d healthy proxies from database", len(proxies))
 	return nil
 }
 
@@ -226,7 +228,7 @@ func (m *DBManager) ReportProxyFailure(proxy scraper.Proxy) {
 
 	if len(newProxies) < len(m.cachedProxies) {
 		m.cachedProxies = newProxies
-		log.Printf("Removed failing proxy from cache: %s", targetKey)
+		m.logger.WarnBg("Removed failing proxy from cache: %s", targetKey)
 
 		if m.currentIndex >= len(m.cachedProxies) && len(m.cachedProxies) > 0 {
 			m.currentIndex = 0
@@ -253,7 +255,7 @@ func (m *DBManager) GetStats() Stats {
 		}
 	}
 
-	log.Printf("DEBUG: GetStats() called - cached proxies: %d", len(m.cachedProxies))
+	m.logger.DebugBg("GetStats() called - cached proxies: %d", len(m.cachedProxies))
 	return stats
 }
 
@@ -266,13 +268,13 @@ func (m *DBManager) GetDBStats(ctx context.Context) (database.ProxyStats, error)
 func (m *DBManager) backgroundRefresh() {
 	defer m.wg.Done()
 	
-	log.Println("Running background refresh...")
+	m.logger.InfoBg("Running background refresh...")
 	if err := m.RefreshProxies(); err != nil {
-		log.Printf("Background refresh failed: %v", err)
+		m.logger.WarnBg("Background refresh failed: %v", err)
 		// If refresh failed, try to load any existing healthy proxies from DB
-		log.Println("Attempting to load healthy proxies from database as fallback...")
+		m.logger.InfoBg("Attempting to load healthy proxies from database as fallback...")
 		if err := m.loadHealthyProxies(); err != nil {
-			log.Printf("Fallback load also failed: %v", err)
+			m.logger.ErrorBg("Fallback load also failed: %v", err)
 		}
 	}
 }
@@ -293,15 +295,15 @@ func (m *DBManager) cacheRefreshLoop(ticker *time.Ticker) {
 			m.mu.RUnlock()
 			
 			if currentCount < 5 { // Reload if we have fewer than 5 proxies
-				log.Printf("Cache has only %d proxies, reloading from database...", currentCount)
+				m.logger.InfoBg("Cache has only %d proxies, reloading from database...", currentCount)
 				if err := m.loadHealthyProxies(); err != nil {
-					log.Printf("Failed to reload cache from database: %v", err)
+					m.logger.WarnBg("Failed to reload cache from database: %v", err)
 				} else {
 					m.mu.RLock()
 					newCount := len(m.cachedProxies)
 					m.mu.RUnlock()
 					if newCount > currentCount {
-						log.Printf("Cache reloaded: %d -> %d proxies", currentCount, newCount)
+						m.logger.InfoBg("Cache reloaded: %d -> %d proxies", currentCount, newCount)
 					}
 				}
 			}
@@ -318,9 +320,9 @@ func (m *DBManager) updateLoop() {
 		case <-m.ctx.Done():
 			return
 		case <-m.updateTicker.C:
-			log.Println("Running scheduled proxy refresh...")
+			m.logger.InfoBg("Running scheduled proxy refresh...")
 			if err := m.RefreshProxies(); err != nil {
-				log.Printf("Failed to refresh proxies: %v", err)
+				m.logger.ErrorBg("Failed to refresh proxies: %v", err)
 			}
 		}
 	}

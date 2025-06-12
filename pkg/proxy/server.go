@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -14,16 +13,19 @@ import (
 	"sync"
 	"time"
 
+	"aproxy/internal/logger"
 	"aproxy/pkg/manager"
 	"aproxy/pkg/scraper"
 )
 
 type Server struct {
-	manager manager.ProxyManager
-	server  *http.Server
-	config  *Config
-	stats   *Stats
-	mu      sync.RWMutex
+	manager     manager.ProxyManager
+	server      *http.Server
+	config      *Config
+	stats       *Stats
+	logger      *logger.Logger
+	httpLogger  *logger.Logger
+	httpsLogger *logger.Logger
 }
 
 type Config struct {
@@ -34,6 +36,7 @@ type Config struct {
 	MaxConnections int
 	EnableHTTPS    bool
 	EnableSOCKS    bool
+	MaxRetries     int
 	StripHeaders   []string
 	AddHeaders     map[string]string
 }
@@ -52,9 +55,12 @@ func NewServer(mgr manager.ProxyManager, config *Config) *Server {
 	}
 
 	return &Server{
-		manager: mgr,
-		config:  config,
-		stats:   &Stats{},
+		manager:     mgr,
+		config:      config,
+		stats:       &Stats{},
+		logger:      logger.New("server"),
+		httpLogger:  logger.New("http"),
+		httpsLogger: logger.New("https"),
 	}
 }
 
@@ -67,6 +73,7 @@ func DefaultConfig() *Config {
 		MaxConnections: 1000,
 		EnableHTTPS:    true,
 		EnableSOCKS:    false,
+		MaxRetries:     3,
 		StripHeaders: []string{
 			"X-Forwarded-For",
 			"X-Real-IP",
@@ -102,6 +109,8 @@ func (s *Server) Stop(ctx context.Context) error {
 
 // ServeHTTP implements http.Handler interface
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	reqID := logger.GenerateID()
+	
 	// Handle special endpoints
 	if r.Method == "GET" {
 		switch r.URL.Path {
@@ -116,12 +125,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Only handle valid proxy requests
 	if !s.isValidProxyRequest(r) {
+		s.logger.Warn(reqID, "Invalid proxy request: %s %s", r.Method, r.URL.String())
 		http.Error(w, "Invalid proxy request", http.StatusBadRequest)
 		return
 	}
 
+	s.logger.Info(reqID, "Received %s request for %s", r.Method, r.URL.String())
+
 	// Handle proxy requests (both HTTP and HTTPS CONNECT)
-	s.handleHTTP(w, r)
+	s.handleHTTP(w, r, reqID)
 }
 
 // isValidProxyRequest checks if the request is a valid proxy request
@@ -130,73 +142,123 @@ func (s *Server) isValidProxyRequest(r *http.Request) bool {
 	if r.Method == http.MethodConnect {
 		return true
 	}
-	
+
 	// For other methods, the URL must be absolute (have a scheme and host)
 	if r.URL.Scheme != "" && r.URL.Host != "" {
 		return true
 	}
-	
+
 	// Reject relative URLs (like /favicon.ico, /robots.txt, etc.)
 	return false
 }
 
-func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("DEBUG: Received %s request for %s", r.Method, r.URL.String())
-
+func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request, reqID string) {
 	if r.Method == http.MethodConnect {
-		s.handleHTTPSConnect(w, r)
+		s.handleHTTPSConnect(w, r, reqID)
 		return
 	}
 
-	proxy, err := s.manager.GetNextProxy()
-	if err != nil {
-		s.incrementFailedRequests()
-		http.Error(w, "No proxy available", http.StatusServiceUnavailable)
-		return
+	// Retry logic for HTTP requests
+	maxRetries := s.config.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 1
 	}
 
-	s.proxyHTTPRequest(w, r, proxy)
+	s.httpLogger.Debug(reqID, "Starting HTTP proxy attempts (max: %d)", maxRetries)
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		proxy, err := s.manager.GetNextProxy()
+		if err != nil {
+			if attempt == maxRetries-1 {
+				s.httpLogger.Error(reqID, "No proxies available after %d attempts", maxRetries)
+				s.incrementFailedRequests()
+				http.Error(w, "No proxy available", http.StatusServiceUnavailable)
+				return
+			}
+			s.httpLogger.Warn(reqID, "No proxy available for attempt %d/%d, retrying", attempt+1, maxRetries)
+			continue
+		}
+
+		s.httpLogger.Debug(reqID, "Attempt %d/%d using proxy %s", attempt+1, maxRetries, proxy.Address())
+
+		if s.tryProxyHTTPRequest(w, r, proxy, reqID) {
+			s.httpLogger.Info(reqID, "Request successful via proxy %s", proxy.Address())
+			return // Success
+		}
+
+		// Report failure and try next proxy
+		s.manager.ReportProxyFailure(*proxy)
+		s.httpLogger.Warn(reqID, "Proxy %s failed, trying next", proxy.Address())
+	}
+
+	// All attempts failed
+	s.httpLogger.Error(reqID, "All %d proxy attempts failed", maxRetries)
+	s.incrementFailedRequests()
+	http.Error(w, "All proxy attempts failed", http.StatusBadGateway)
 }
 
-func (s *Server) handleHTTPSConnect(w http.ResponseWriter, r *http.Request) {
-	log.Printf("DEBUG: HTTPS CONNECT request received for %s", r.URL.Host)
-
+func (s *Server) handleHTTPSConnect(w http.ResponseWriter, r *http.Request, reqID string) {
 	if !s.config.EnableHTTPS {
+		s.httpsLogger.Warn(reqID, "HTTPS not enabled in configuration")
 		http.Error(w, "HTTPS not supported", http.StatusMethodNotAllowed)
 		return
 	}
 
-	proxy, err := s.manager.GetNextProxy()
-	if err != nil {
-		s.incrementFailedRequests()
-		http.Error(w, "No proxy available", http.StatusServiceUnavailable)
-		return
+	// Retry logic for HTTPS CONNECT requests
+	maxRetries := s.config.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 1
 	}
 
-	log.Printf("DEBUG: Using proxy %s for HTTPS CONNECT", proxy.Address())
+	s.httpsLogger.Debug(reqID, "Starting HTTPS CONNECT attempts (max: %d) for %s", maxRetries, r.URL.Host)
 
-	// Try CONNECT tunnel first, fallback to HTTP proxy method
-	if s.tryHTTPSConnect(w, r, proxy) {
-		log.Printf("DEBUG: CONNECT tunnel successful")
-		return
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		proxy, err := s.manager.GetNextProxy()
+		if err != nil {
+			if attempt == maxRetries-1 {
+				s.httpsLogger.Error(reqID, "No proxies available after %d attempts", maxRetries)
+				s.incrementFailedRequests()
+				http.Error(w, "No proxy available", http.StatusServiceUnavailable)
+				return
+			}
+			s.httpsLogger.Warn(reqID, "No proxy available for attempt %d/%d, retrying", attempt+1, maxRetries)
+			continue
+		}
+
+		s.httpsLogger.Debug(reqID, "Attempt %d/%d using proxy %s", attempt+1, maxRetries, proxy.Address())
+
+		// Try CONNECT tunnel first, fallback to HTTP proxy method
+		if s.tryHTTPSConnect(w, r, proxy, reqID) {
+			s.httpsLogger.Info(reqID, "CONNECT tunnel successful via proxy %s", proxy.Address())
+			return
+		}
+
+		s.httpsLogger.Debug(reqID, "CONNECT tunnel failed, trying HTTP fallback")
+		if s.tryHTTPSViaHTTPProxy(w, r, proxy, reqID) {
+			s.httpsLogger.Info(reqID, "HTTP fallback successful via proxy %s", proxy.Address())
+			return
+		}
+
+		// Report failure and try next proxy
+		s.manager.ReportProxyFailure(*proxy)
+		s.httpsLogger.Warn(reqID, "Proxy %s failed for HTTPS, trying next", proxy.Address())
 	}
 
-	log.Printf("DEBUG: CONNECT failed, trying fallback")
-	// Fallback: Convert CONNECT to direct HTTPS request via HTTP proxy
-	s.handleHTTPSViaHTTPProxy(w, r, proxy)
+	// All attempts failed
+	s.httpsLogger.Error(reqID, "All %d HTTPS proxy attempts failed", maxRetries)
+	s.incrementFailedRequests()
+	http.Error(w, "All HTTPS proxy attempts failed", http.StatusBadGateway)
 }
 
-func (s *Server) proxyHTTPRequest(w http.ResponseWriter, r *http.Request, proxy *scraper.Proxy) {
+func (s *Server) tryProxyHTTPRequest(w http.ResponseWriter, r *http.Request, proxy *scraper.Proxy, reqID string) bool {
 	s.incrementActiveConnections()
 	defer s.decrementActiveConnections()
 
 	proxyURL := fmt.Sprintf("http://%s:%d", proxy.Host, proxy.Port)
 	proxyURLParsed, err := url.Parse(proxyURL)
 	if err != nil {
-		s.manager.ReportProxyFailure(*proxy)
-		s.incrementFailedRequests()
-		http.Error(w, "Invalid proxy", http.StatusInternalServerError)
-		return
+		s.httpLogger.Error(reqID, "Invalid proxy URL %s: %v", proxyURL, err)
+		return false
 	}
 
 	transport := &http.Transport{
@@ -227,11 +289,8 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, r *http.Request, proxy 
 
 	resp, err := client.Do(req)
 	if err != nil {
-		s.manager.ReportProxyFailure(*proxy)
-		s.incrementFailedRequests()
-		log.Printf("DEBUG: HTTP request to %s via proxy %s failed: %v", req.URL.String(), proxy.Address(), err)
-		http.Error(w, "Proxy request failed", http.StatusBadGateway)
-		return
+		s.httpLogger.Warn(reqID, "HTTP request to %s via proxy %s failed: %v", req.URL.String(), proxy.Address(), err)
+		return false
 	}
 	defer resp.Body.Close()
 
@@ -241,18 +300,21 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, r *http.Request, proxy 
 
 	written, err := io.Copy(w, resp.Body)
 	if err != nil {
-		log.Printf("Error copying response: %v", err)
+		s.httpLogger.Error(reqID, "Error copying response: %v", err)
+		return false
 	}
 
 	s.incrementRequestsHandled()
 	s.addBytesTransferred(written)
+	s.httpLogger.Debug(reqID, "HTTP request successful, %d bytes transferred", written)
+	return true
 }
 
-func (s *Server) tryHTTPSConnect(w http.ResponseWriter, r *http.Request, proxy *scraper.Proxy) bool {
+func (s *Server) tryHTTPSConnect(w http.ResponseWriter, r *http.Request, proxy *scraper.Proxy, reqID string) bool {
 	s.incrementActiveConnections()
 	defer s.decrementActiveConnections()
 
-	targetConn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", proxy.Host, proxy.Port), 10*time.Second)
+	targetConn, err := net.DialTimeout("tcp", net.JoinHostPort(proxy.Host, fmt.Sprintf("%d", proxy.Port)), 10*time.Second)
 	if err != nil {
 		s.manager.ReportProxyFailure(*proxy)
 		return false
@@ -270,9 +332,9 @@ func (s *Server) tryHTTPSConnect(w http.ResponseWriter, r *http.Request, proxy *
 	if err != nil || response.StatusCode != http.StatusOK {
 		s.manager.ReportProxyFailure(*proxy)
 		if response != nil {
-			log.Printf("DEBUG: CONNECT to %s via proxy %s failed with status %d %s - trying fallback", r.URL.Host, proxy.Address(), response.StatusCode, response.Status)
+			s.httpsLogger.Warn(reqID, "CONNECT to %s via proxy %s failed with status %d %s", r.URL.Host, proxy.Address(), response.StatusCode, response.Status)
 		} else {
-			log.Printf("DEBUG: CONNECT to %s via proxy %s failed with error: %v - trying fallback", r.URL.Host, proxy.Address(), err)
+			s.httpsLogger.Warn(reqID, "CONNECT to %s via proxy %s failed with error: %v", r.URL.Host, proxy.Address(), err)
 		}
 		return false
 	}
@@ -294,14 +356,14 @@ func (s *Server) tryHTTPSConnect(w http.ResponseWriter, r *http.Request, proxy *
 
 	// Use channels to coordinate bidirectional copying
 	done := make(chan struct{}, 2)
-	
+
 	// Copy client -> target
 	go func() {
 		defer func() { done <- struct{}{} }()
 		io.Copy(targetConn, clientConn)
 		targetConn.Close()
 	}()
-	
+
 	// Copy target -> client
 	go func() {
 		defer func() { done <- struct{}{} }()
@@ -313,12 +375,12 @@ func (s *Server) tryHTTPSConnect(w http.ResponseWriter, r *http.Request, proxy *
 	// Wait for both goroutines to complete
 	<-done
 	<-done
-	
+
 	s.incrementRequestsHandled()
 	return true
 }
 
-func (s *Server) handleHTTPSViaHTTPProxy(w http.ResponseWriter, r *http.Request, proxy *scraper.Proxy) {
+func (s *Server) tryHTTPSViaHTTPProxy(w http.ResponseWriter, r *http.Request, proxy *scraper.Proxy, reqID string) bool {
 	s.incrementActiveConnections()
 	defer s.decrementActiveConnections()
 
@@ -328,16 +390,14 @@ func (s *Server) handleHTTPSViaHTTPProxy(w http.ResponseWriter, r *http.Request,
 		host += ":443" // Default HTTPS port
 	}
 
-	log.Printf("DEBUG: Fallback HTTPS via HTTP proxy %s for host %s", proxy.Address(), host)
+	s.httpsLogger.Debug(reqID, "Fallback HTTPS via HTTP proxy %s for host %s", proxy.Address(), host)
 
 	// Create a simple tunnel by proxying the raw TCP connection
-	proxyAddr := fmt.Sprintf("%s:%d", proxy.Host, proxy.Port)
+	proxyAddr := net.JoinHostPort(proxy.Host, fmt.Sprintf("%d", proxy.Port))
 	proxyConn, err := net.DialTimeout("tcp", proxyAddr, 10*time.Second)
 	if err != nil {
-		s.manager.ReportProxyFailure(*proxy)
-		s.incrementFailedRequests()
-		http.Error(w, "Failed to connect to proxy", http.StatusBadGateway)
-		return
+		s.httpsLogger.Warn(reqID, "Failed to connect to proxy %s: %v", proxy.Address(), err)
+		return false
 	}
 	defer proxyConn.Close()
 
@@ -345,41 +405,35 @@ func (s *Server) handleHTTPSViaHTTPProxy(w http.ResponseWriter, r *http.Request,
 	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Connection: keep-alive\r\n\r\n", host, host)
 	_, err = proxyConn.Write([]byte(connectReq))
 	if err != nil {
-		s.manager.ReportProxyFailure(*proxy)
-		s.incrementFailedRequests()
-		http.Error(w, "Failed to send CONNECT", http.StatusBadGateway)
-		return
+		s.httpsLogger.Warn(reqID, "Failed to send CONNECT to proxy %s: %v", proxy.Address(), err)
+		return false
 	}
 
 	// Read the proxy response
 	reader := bufio.NewReader(proxyConn)
 	resp, err := http.ReadResponse(reader, r)
 	if err != nil {
-		s.manager.ReportProxyFailure(*proxy)
-		s.incrementFailedRequests()
-		http.Error(w, "Proxy error", http.StatusBadGateway)
-		return
+		s.httpsLogger.Warn(reqID, "Error reading proxy response from %s: %v", proxy.Address(), err)
+		return false
 	}
 
-	// If proxy doesn't support CONNECT, report failure and try direct connection
+	// If proxy doesn't support CONNECT, report failure
 	if resp.StatusCode != http.StatusOK {
-		s.manager.ReportProxyFailure(*proxy)
-		log.Printf("DEBUG: Proxy %s doesn't support CONNECT (%d), attempting direct connection", proxy.Address(), resp.StatusCode)
-		s.handleDirectHTTPS(w, r, host)
-		return
+		s.httpsLogger.Warn(reqID, "Proxy %s doesn't support CONNECT (status %d)", proxy.Address(), resp.StatusCode)
+		return false
 	}
 
 	// Success! Establish the tunnel
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
-		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
-		return
+		s.httpsLogger.Error(reqID, "Hijacking not supported")
+		return false
 	}
 
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
-		http.Error(w, "Hijacking failed", http.StatusInternalServerError)
-		return
+		s.httpsLogger.Error(reqID, "Hijacking failed: %v", err)
+		return false
 	}
 	defer clientConn.Close()
 
@@ -388,14 +442,14 @@ func (s *Server) handleHTTPSViaHTTPProxy(w http.ResponseWriter, r *http.Request,
 
 	// Use channels to coordinate bidirectional copying
 	done := make(chan struct{}, 2)
-	
+
 	// Copy client -> proxy
 	go func() {
 		defer func() { done <- struct{}{} }()
 		io.Copy(proxyConn, clientConn)
 		proxyConn.Close()
 	}()
-	
+
 	// Copy proxy -> client
 	go func() {
 		defer func() { done <- struct{}{} }()
@@ -407,60 +461,10 @@ func (s *Server) handleHTTPSViaHTTPProxy(w http.ResponseWriter, r *http.Request,
 	// Wait for both goroutines to complete
 	<-done
 	<-done
-	
+
 	s.incrementRequestsHandled()
-}
-
-func (s *Server) handleDirectHTTPS(w http.ResponseWriter, _ *http.Request, host string) {
-	// As a last resort, make a direct connection (no proxy)
-	log.Printf("DEBUG: Making direct HTTPS connection to %s", host)
-
-	targetConn, err := net.DialTimeout("tcp", host, 10*time.Second)
-	if err != nil {
-		s.incrementFailedRequests()
-		http.Error(w, "Failed to connect directly", http.StatusBadGateway)
-		return
-	}
-	defer targetConn.Close()
-
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
-		return
-	}
-
-	clientConn, _, err := hijacker.Hijack()
-	if err != nil {
-		http.Error(w, "Hijacking failed", http.StatusInternalServerError)
-		return
-	}
-	defer clientConn.Close()
-
-	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
-
-	// Use channels to coordinate bidirectional copying
-	done := make(chan struct{}, 2)
-	
-	// Copy client -> target
-	go func() {
-		defer func() { done <- struct{}{} }()
-		io.Copy(targetConn, clientConn)
-		targetConn.Close()
-	}()
-	
-	// Copy target -> client
-	go func() {
-		defer func() { done <- struct{}{} }()
-		written, _ := io.Copy(clientConn, targetConn)
-		s.addBytesTransferred(written)
-		clientConn.Close()
-	}()
-
-	// Wait for both goroutines to complete
-	<-done
-	<-done
-	
-	s.incrementRequestsHandled()
+	s.httpsLogger.Debug(reqID, "HTTPS via HTTP proxy %s successful", proxy.Address())
+	return true
 }
 
 func (s *Server) sanitizeRequest(req *http.Request) {

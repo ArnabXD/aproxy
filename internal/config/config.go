@@ -28,6 +28,7 @@ type ServerConfig struct {
 	MaxConnections int               `mapstructure:"max_connections" validate:"required,min=1,max=10000"`
 	EnableHTTPS    bool              `mapstructure:"enable_https"`
 	EnableSOCKS    bool              `mapstructure:"enable_socks"`
+	MaxRetries     int               `mapstructure:"max_retries" validate:"required,min=1,max=10"`
 	StripHeaders   []string          `mapstructure:"strip_headers"`
 	AddHeaders     map[string]string `mapstructure:"add_headers"`
 }
@@ -80,6 +81,7 @@ func setDefaults() {
 	viper.SetDefault("server.max_connections", 1000)
 	viper.SetDefault("server.enable_https", true)
 	viper.SetDefault("server.enable_socks", false)
+	viper.SetDefault("server.max_retries", 3)
 	viper.SetDefault("server.strip_headers", []string{
 		"X-Forwarded-For", "X-Real-IP", "X-Original-IP", "CF-Connecting-IP", "True-Client-IP",
 	})

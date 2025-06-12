@@ -193,3 +193,4 @@ The SQLite database includes:
 - All configuration changes should include validation tags
 - Test Docker builds locally before deployment
 - Database migrations handled automatically by schema initialization
+- Optimize claude for minimal token usage

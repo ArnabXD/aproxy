@@ -3,6 +3,7 @@ package scraper
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -253,6 +254,7 @@ func NewMultiScraper() *MultiScraper {
 		scrapers: []Scraper{
 			NewProxyScrapeAPI(),
 			NewFreeProxyListScraper(),
+			NewGeonodeAPIScraper(), // Add the new Geonode API scraper
 		},
 	}
 }
@@ -376,53 +378,60 @@ func (p *ProxyListOrgScraper) parseProxies(reader io.Reader, proxyType string) (
 	return proxies, scanner.Err()
 }
 
-// GeonodeScraper scrapes from GitHub proxy lists
-type GeonodeScraper struct {
+// GeonodeAPIScraper scrapes from Geonode free proxy API
+type GeonodeAPIScraper struct {
 	client *http.Client
 }
 
-func NewGeonodeScraper() *GeonodeScraper {
-	return &GeonodeScraper{
+type GeonodeResponse struct {
+	Data  []GeonodeProxy `json:"data"`
+	Total int            `json:"total"`
+	Page  int            `json:"page"`
+	Limit int            `json:"limit"`
+}
+
+type GeonodeProxy struct {
+	ID             string   `json:"_id"`
+	IP             string   `json:"ip"`
+	Port           string   `json:"port"`
+	Protocols      []string `json:"protocols"`
+	Country        string   `json:"country"`
+	AnonymityLevel string   `json:"anonymityLevel"`
+	Latency        float64  `json:"latency"`
+	Speed          int      `json:"speed"`
+	UpTime         float64  `json:"upTime"`
+	LastChecked    int64    `json:"lastChecked"`
+	CreatedAt      string   `json:"created_at"`
+	UpdatedAt      string   `json:"updated_at"`
+}
+
+func NewGeonodeAPIScraper() *GeonodeAPIScraper {
+	return &GeonodeAPIScraper{
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 60 * time.Second, // Longer timeout for large response
 		},
 	}
 }
 
-func (g *GeonodeScraper) Name() string {
-	return "github-proxies"
+func (g *GeonodeAPIScraper) Name() string {
+	return "geonode-api"
 }
 
-func (g *GeonodeScraper) Scrape(ctx context.Context) ([]Proxy, error) {
-	urls := []string{
-		"https://raw.githubusercontent.com/proxy4parsing/proxy-list/main/http.txt",
-		"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-		"https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
-	}
+func (g *GeonodeAPIScraper) Scrape(ctx context.Context) ([]Proxy, error) {
+	// Use limit=1000 as requested
+	apiURL := "https://proxylist.geonode.com/api/proxy-list?limit=500"
 
-	var allProxies []Proxy
-	for _, apiURL := range urls {
-		proxies, err := g.scrapeURL(ctx, apiURL)
-		if err != nil {
-			continue
-		}
-		allProxies = append(allProxies, proxies...)
-	}
-
-	return allProxies, nil
-}
-
-func (g *GeonodeScraper) scrapeURL(ctx context.Context, apiURL string) ([]Proxy, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch data: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -430,46 +439,44 @@ func (g *GeonodeScraper) scrapeURL(ctx context.Context, apiURL string) ([]Proxy,
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	// Determine proxy type from URL
-	proxyType := "http"
-	if strings.Contains(apiURL, "socks5") {
-		proxyType = "socks5"
-	} else if strings.Contains(apiURL, "socks4") {
-		proxyType = "socks4"
+	var geonodeResp GeonodeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&geonodeResp); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
-	return g.parseProxies(resp.Body, proxyType)
-}
-
-func (g *GeonodeScraper) parseProxies(reader io.Reader, proxyType string) ([]Proxy, error) {
 	var proxies []Proxy
-	scanner := bufio.NewScanner(reader)
+	httpCount := 0
+	socksCount := 0
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		parts := strings.Split(line, ":")
-		if len(parts) != 2 {
-			continue
-		}
-
-		port, err := strconv.Atoi(parts[1])
+	for _, geoProxy := range geonodeResp.Data {
+		port, err := strconv.Atoi(geoProxy.Port)
 		if err != nil {
-			continue
+			continue // Skip invalid ports
 		}
 
-		proxy := Proxy{
-			Host:     parts[0],
-			Port:     port,
-			Type:     proxyType,
-			LastSeen: time.Now(),
-		}
+		// Process each protocol supported by the proxy
+		for _, protocol := range geoProxy.Protocols {
+			proxy := Proxy{
+				Host:     geoProxy.IP,
+				Port:     port,
+				Type:     protocol,
+				Country:  geoProxy.Country,
+				LastSeen: time.Now(),
+			}
 
-		proxies = append(proxies, proxy)
+			proxies = append(proxies, proxy)
+
+			// Count proxy types
+			if protocol == "http" || protocol == "https" {
+				httpCount++
+			} else if protocol == "socks4" || protocol == "socks5" {
+				socksCount++
+			}
+		}
 	}
 
-	return proxies, scanner.Err()
+	log.Printf("Geonode API collected: %d HTTP/HTTPS, %d SOCKS from %d total proxies",
+		httpCount, socksCount, len(geonodeResp.Data))
+
+	return proxies, nil
 }

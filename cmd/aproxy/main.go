@@ -91,6 +91,7 @@ func main() {
 		MaxConnections: cfg.Server.MaxConnections,
 		EnableHTTPS:    cfg.Server.EnableHTTPS,
 		EnableSOCKS:    cfg.Server.EnableSOCKS,
+		MaxRetries:     cfg.Server.MaxRetries,
 		StripHeaders:   cfg.Server.StripHeaders,
 		AddHeaders:     cfg.Server.AddHeaders,
 	}

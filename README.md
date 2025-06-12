@@ -47,48 +47,59 @@ AProxy is a high-performance anonymous proxy server written in Go that automatic
 
 AProxy supports multiple configuration methods:
 
-### 1. Environment Variables (.env file)
+### 1. YAML Configuration File (Recommended)
 
-Copy `.env.example` to `.env` and modify as needed:
-
+Generate a default config file:
 ```bash
-cp .env.example .env
+./aproxy -gen-config  # Creates config.yaml
 ```
 
-Key environment variables:
+Then run with the config:
+```bash
+./aproxy -config config.yaml
+```
+
+### 2. Environment Variables (Docker-friendly)
+
+All configuration options can be set via environment variables using the `APROXY_` prefix:
 
 **Server Configuration:**
-- `APROXY_LISTEN_ADDR`: Server address (default: `:8080`)
-- `APROXY_ENABLE_HTTPS`: Enable HTTPS CONNECT support (default: `true`)
-- `APROXY_ENABLE_SOCKS`: Enable SOCKS proxy support (default: `false`)
+- `APROXY_SERVER_LISTEN_ADDR`: Server bind address (default: `:8080`)
+- `APROXY_SERVER_ENABLE_HTTPS`: Enable HTTPS CONNECT support (default: `true`)
+- `APROXY_SERVER_ENABLE_SOCKS`: Enable SOCKS proxy support (default: `false`)
+- `APROXY_SERVER_MAX_CONNECTIONS`: Maximum concurrent connections (default: `1000`)
+- `APROXY_SERVER_MAX_RETRIES`: Maximum retry attempts for failed proxies (default: `3`)
 
 **Proxy Management:**
-- `APROXY_UPDATE_INTERVAL`: Proxy refresh interval (default: `15m`)
-- `APROXY_MAX_FAILURES`: Max failures before removing proxy (default: `3`)
-- `APROXY_RECHECK_TIME`: Time before re-checking failed proxies (default: `5m`)
+- `APROXY_PROXY_UPDATE_INTERVAL`: Proxy refresh interval (default: `15m`)
+- `APROXY_PROXY_MAX_FAILURES`: Max failures before removing proxy (default: `3`)
+- `APROXY_PROXY_RECHECK_TIME`: Time before re-checking failed proxies (default: `5m`)
 
 **Health Checking:**
 - `APROXY_CHECKER_CHECK_INTERVAL`: Minimum time between proxy health checks (default: `10m`)
 - `APROXY_CHECKER_TIMEOUT`: Proxy test timeout (default: `15s`)
 - `APROXY_CHECKER_MAX_WORKERS`: Concurrent health check workers (default: `50`)
 - `APROXY_CHECKER_TEST_URL`: URL used to test proxy health (default: `http://icanhazip.com`)
+- `APROXY_CHECKER_BATCH_SIZE`: Number of proxies to check in each batch (default: `50`)
+- `APROXY_CHECKER_BATCH_DELAY`: Delay between batches (default: `30s`)
+- `APROXY_CHECKER_BACKGROUND_ENABLED`: Enable background checking (default: `true`)
 
 **Database Configuration:**
-- `APROXY_DATABASE_PATH`: SQLite database file path (default: `./aproxy.db`)
+- `APROXY_DATABASE_PATH`: SQLite database file path (default: `./data/aproxy.db`)
 - `APROXY_DATABASE_MAX_AGE`: Maximum age for proxy records before cleanup (default: `24h`)
 - `APROXY_DATABASE_CLEANUP_INTERVAL`: How often to run database cleanup (default: `1h`)
 
-### 2. JSON Configuration File
+**Scraper Configuration:**
+- `APROXY_SCRAPER_TIMEOUT`: Scraper request timeout (default: `30s`)
+- `APROXY_SCRAPER_SOURCES`: Comma-separated list of proxy sources (default: `proxyscrape,freeproxylist`)
 
-Generate a default config file:
-```bash
-./aproxy -gen-config
-```
-
-Then run with custom config:
-```bash
-./aproxy -config config.json
-```
+**Logging Configuration:**
+- `APROXY_LOGGING_LEVEL`: Log level (debug, info, warn, error) (default: `info`)
+- `APROXY_LOGGING_FORMAT`: Log format (json, text) (default: `json`)
+- `APROXY_LOGGING_FILE`: Log file path (default: `./data/aproxy.log`)
+- `APROXY_LOGGING_MAX_SIZE`: Maximum log file size in MB (default: `100`)
+- `APROXY_LOGGING_MAX_AGE`: Maximum log file age in days (default: `30`)
+- `APROXY_LOGGING_COMPRESS`: Compress rotated log files (default: `true`)
 
 ### 3. Command Line Options
 
@@ -211,7 +222,7 @@ AProxy follows a modular architecture with clear separation of concerns:
 ## Development
 
 ### Prerequisites
-- Go 1.19 or later
+- Go 1.24 or later
 - Internet connection for proxy scraping
 
 ### Build Commands
@@ -229,6 +240,52 @@ go fmt ./...
 go mod tidy
 ```
 
+## Docker Deployment
+
+### Using Docker Compose (Recommended)
+
+```bash
+# Build and run with Docker Compose
+docker-compose up --build
+
+# Run in background
+docker-compose up -d --build
+
+# View logs
+docker-compose logs -f
+
+# Stop containers
+docker-compose down
+
+# Clean up volumes (removes database)
+docker-compose down -v
+```
+
+### Manual Docker Build
+
+```bash
+# Build Docker image
+docker build -t aproxy .
+
+# Run with persistent data volume
+docker run -d \
+  --name aproxy \
+  -p 8080:8080 \
+  -v aproxy-data:/app/data \
+  aproxy
+
+# View logs
+docker logs -f aproxy
+```
+
+### Docker Features
+
+- **Persistent Storage**: Database and logs stored in `./data/` volume
+- **Health Checks**: Built-in health monitoring via `/health` endpoint
+- **Resource Limits**: CPU and memory constraints configured
+- **Non-root User**: Runs as unprivileged user for security
+- **Alpine Linux**: Minimal attack surface with small image size
+
 ### Project Structure
 ```
 aproxy/
@@ -239,14 +296,16 @@ aproxy/
 │   ├── manager/         # Proxy pool management (database + memory)
 │   └── proxy/           # HTTP proxy server
 ├── internal/
-│   ├── config/          # Configuration management
-│   └── database/        # SQLite database layer
-│       ├── models/      # Generated database models
-│       ├── schema.sql   # Database schema
-│       ├── db.go        # Database initialization
-│       ├── service.go   # Database operations
-│       └── types.go     # Database types
-├── .env.example         # Environment variable template
+│   ├── config/          # Configuration management (Viper-based)
+│   ├── database/        # SQLite database layer with Jet ORM
+│   └── logger/          # Structured logging
+├── data/                # Persistent data directory
+│   ├── aproxy.db        # SQLite database
+│   └── aproxy.log       # Application logs
+├── config.example.yaml  # Example YAML configuration
+├── config.yaml          # Active YAML configuration
+├── docker-compose.yml   # Docker Compose configuration
+├── Dockerfile           # Docker build configuration
 ├── CLAUDE.md           # AI assistant instructions
 └── README.md           # This file
 ```

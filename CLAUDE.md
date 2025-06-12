@@ -127,17 +127,38 @@ export APROXY_DATABASE_PATH="/data/aproxy.db"
 - **Environment mapping**: `APROXY_SERVER_LISTEN_ADDR` → `server.listen_addr`
 
 **Configuration Sections:**
-- **Server**: Listen address, timeouts, connection limits, protocol support
+- **Server**: Listen address, timeouts, connection limits, protocol support, header manipulation
 - **Proxy**: Update intervals, failure thresholds, recheck timing
 - **Database**: SQLite path, cleanup intervals, max age settings
 - **Checker**: Health check URLs, timeouts, worker pools, intervals, batch checking settings
 - **Scraper**: Sources, timeouts, user agents (GitHub sources removed for performance)
-- **Logging**: Levels, formats, file rotation settings
+- **Logging**: Levels, formats, file rotation settings, compression options
 
-**New Checker Configuration Options:**
-- `checker.batch_size`: Number of proxies to check in each batch (default: 50)
-- `checker.batch_delay`: Delay between batches (default: 30s)
-- `checker.background_enabled`: Enable background checking (default: true)
+**Server Configuration Options:**
+- `server.listen_addr`: Server bind address (default: `:8080`)
+- `server.enable_https`: Enable HTTPS CONNECT tunneling (default: `true`)
+- `server.enable_socks`: Enable SOCKS proxy support (default: `false`)
+- `server.max_connections`: Maximum concurrent connections (default: `1000`)
+- `server.strip_headers`: Headers to remove for privacy (X-Forwarded-For, X-Real-IP, etc.)
+- `server.add_headers`: Headers to add for spoofing (User-Agent, etc.)
+- `server.max_retries`: Maximum retry attempts for failed proxies (default: `3`)
+
+**Checker Configuration Options:**
+- `checker.batch_size`: Number of proxies to check in each batch (default: `50`)
+- `checker.batch_delay`: Delay between batches (default: `30s`)
+- `checker.background_enabled`: Enable background checking (default: `true`)
+- `checker.check_interval`: Minimum time between proxy health checks (default: `10m`)
+- `checker.timeout`: Proxy test timeout (default: `15s`)
+- `checker.max_workers`: Concurrent health check workers (default: `50`)
+- `checker.test_url`: URL used to test proxy health (default: `http://icanhazip.com`)
+
+**Logging Configuration Options:**
+- `logging.level`: Log level (debug, info, warn, error) (default: `info`)
+- `logging.format`: Log format (json, text) (default: `json`)
+- `logging.file`: Log file path (default: `./data/aproxy.log`)
+- `logging.max_size`: Maximum log file size in MB (default: `100`)
+- `logging.max_age`: Maximum log file age in days (default: `30`)
+- `logging.compress`: Compress rotated log files (default: `true`)
 
 ### API Endpoints
 

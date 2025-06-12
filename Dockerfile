@@ -37,9 +37,6 @@ RUN mkdir -p /app/data && chown aproxy:aproxy /app/data
 # Copy binary from builder stage
 COPY --from=builder /app/aproxy .
 
-# Copy any config files (optional)
-COPY --from=builder /app/CLAUDE.md ./
-
 # Set ownership
 RUN chown -R aproxy:aproxy /app
 

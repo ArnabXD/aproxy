@@ -1,8 +1,8 @@
 # Build stage
 FROM golang:1.24-alpine AS builder
 
-# Install git and ca-certificates (for building)
-RUN apk add --no-cache git ca-certificates
+# Install git, ca-certificates, and build tools (for CGO)
+RUN apk add --no-cache git ca-certificates gcc musl-dev
 
 # Set working directory
 WORKDIR /app

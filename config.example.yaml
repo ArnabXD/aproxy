@@ -1,0 +1,51 @@
+# AProxy Configuration Example
+# This file shows all available configuration options
+
+server:
+  listen_addr: ":8080"
+  read_timeout: "30s"
+  write_timeout: "30s"
+  idle_timeout: "60s"
+  max_connections: 1000
+  enable_https: true
+  enable_socks: false
+  strip_headers:
+    - "X-Forwarded-For"
+    - "X-Real-IP"
+    - "X-Original-IP"
+    - "CF-Connecting-IP"
+    - "True-Client-IP"
+  add_headers:
+    User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+
+proxy:
+  update_interval: "15m"
+  max_failures: 3
+  recheck_time: "5m"
+
+scraper:
+  timeout: "30s"
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  sources:
+    - "proxyscrape"
+    - "freeproxylist"
+
+checker:
+  test_url: "http://icanhazip.com"
+  timeout: "15s"
+  max_workers: 50
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  check_interval: "10m"
+
+database:
+  path: "./data/aproxy.db"
+  max_age: "24h"
+  cleanup_interval: "1h"
+
+logging:
+  level: "info"
+  format: "json"
+  file: "./data/aproxy.log"
+  max_size: 100
+  max_age: 30
+  compress: true

@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  aproxy:
+    build: .
+    container_name: aproxy
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persistent data directory for database and logs
+      - aproxy-data:/app/data
+    environment:
+      # Server configuration
+      - APROXY_LISTEN_ADDR=:8080
+      - APROXY_READ_TIMEOUT=30s
+      - APROXY_WRITE_TIMEOUT=30s
+      - APROXY_IDLE_TIMEOUT=60s
+      - APROXY_MAX_CONNECTIONS=1000
+      - APROXY_ENABLE_HTTPS=true
+      - APROXY_ENABLE_SOCKS=false
+      
+      # Database configuration (uses data volume)
+      - APROXY_DATABASE_PATH=/app/data/aproxy.db
+      - APROXY_DATABASE_MAX_AGE=24h
+      - APROXY_DATABASE_CLEANUP_INTERVAL=1h
+      
+      # Proxy management
+      - APROXY_UPDATE_INTERVAL=15m
+      - APROXY_MAX_FAILURES=3
+      - APROXY_RECHECK_TIME=5m
+      
+      # Checker configuration
+      - APROXY_CHECKER_TEST_URL=http://icanhazip.com
+      - APROXY_CHECKER_TIMEOUT=15s
+      - APROXY_CHECKER_MAX_WORKERS=50
+      - APROXY_CHECKER_CHECK_INTERVAL=10m
+      
+      # Scraper configuration
+      - APROXY_SCRAPER_TIMEOUT=30s
+      - APROXY_SCRAPER_SOURCES=proxyscrape,freeproxylist
+      
+      # Logging configuration
+      - APROXY_LOG_LEVEL=info
+      - APROXY_LOG_FORMAT=json
+      - APROXY_LOG_FILE=/app/data/aproxy.log
+      - APROXY_LOG_MAX_SIZE=100
+      - APROXY_LOG_MAX_AGE=30
+      - APROXY_LOG_COMPRESS=true
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+
+volumes:
+  aproxy-data:
+    driver: local

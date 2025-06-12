@@ -27,45 +27,70 @@ type DBManager struct {
 	cachedProxies []scraper.Proxy
 	currentIndex  int
 	mu            sync.RWMutex
+
+	// Configuration
+	backgroundEnabled bool
+	updateInterval    time.Duration
 }
 
 // NewDBManager creates a new database-backed manager
-func NewDBManager(db *database.DB, checkInterval time.Duration) *DBManager {
+func NewDBManager(db *database.DB, checkInterval time.Duration, backgroundEnabled bool, batchSize int, batchDelay time.Duration) *DBManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	dbService := database.NewService(db)
-	dbChecker := checker.NewDBChecker(dbService, checkInterval)
+	dbChecker := checker.NewDBChecker(dbService, checkInterval, batchSize, batchDelay)
 
 	return &DBManager{
-		scraper:       scraper.NewMultiScraper(),
-		dbChecker:     dbChecker,
-		dbService:     dbService,
-		ctx:           ctx,
-		cancel:        cancel,
-		cachedProxies: make([]scraper.Proxy, 0),
+		scraper:           scraper.NewMultiScraper(),
+		dbChecker:         dbChecker,
+		dbService:         dbService,
+		ctx:               ctx,
+		cancel:            cancel,
+		cachedProxies:     make([]scraper.Proxy, 0),
+		backgroundEnabled: backgroundEnabled,
 	}
 }
 
-// Start begins the proxy manager operations
+// Start begins the proxy manager operations with non-blocking startup
 func (m *DBManager) Start(updateInterval time.Duration) error {
 	log.Println("Starting database-backed proxy manager...")
+	m.updateInterval = updateInterval
 
-	// Load existing healthy proxies from database
+	// Load existing healthy proxies from database (fast, non-blocking)
 	if err := m.loadHealthyProxies(); err != nil {
 		log.Printf("Failed to load existing proxies: %v", err)
 	}
 
-	// Do initial refresh
-	if err := m.RefreshProxies(); err != nil {
-		return fmt.Errorf("initial proxy refresh failed: %w", err)
+	log.Printf("Database proxy manager started with %d cached proxies", len(m.cachedProxies))
+
+	// Start background operations if enabled
+	if m.backgroundEnabled {
+		log.Println("Starting background proxy operations...")
+		
+		// Start background refresh immediately if we have no proxies
+		if len(m.cachedProxies) == 0 {
+			log.Println("No cached proxies found, starting immediate background refresh...")
+			m.wg.Add(1)
+			go m.backgroundRefresh()
+		}
+
+		// Start periodic update loop
+		m.updateTicker = time.NewTicker(updateInterval)
+		m.wg.Add(1)
+		go m.updateLoop()
+		
+		// Start periodic cache refresh from database (more frequent than full updates)
+		cacheRefreshTicker := time.NewTicker(1 * time.Minute)
+		m.wg.Add(1)
+		go m.cacheRefreshLoop(cacheRefreshTicker)
+	} else {
+		log.Println("Background checking disabled, running initial refresh...")
+		// Fallback to blocking behavior if background is disabled
+		if err := m.RefreshProxies(); err != nil {
+			return fmt.Errorf("initial proxy refresh failed: %w", err)
+		}
 	}
 
-	m.updateTicker = time.NewTicker(updateInterval)
-
-	m.wg.Add(1)
-	go m.updateLoop()
-
-	log.Printf("Database proxy manager started with %d cached proxies", len(m.cachedProxies))
 	return nil
 }
 
@@ -87,7 +112,8 @@ func (m *DBManager) Stop() {
 func (m *DBManager) RefreshProxies() error {
 	log.Println("Refreshing proxy list with database caching...")
 
-	ctx, cancel := context.WithTimeout(m.ctx, 3*time.Minute)
+	// Use manager's context to respect cancellation, but with timeout
+	ctx, cancel := context.WithTimeout(m.ctx, 10*time.Minute)
 	defer cancel()
 
 	// Scrape fresh proxies
@@ -98,7 +124,7 @@ func (m *DBManager) RefreshProxies() error {
 
 	log.Printf("Scraped %d proxies, checking health with caching...", len(proxies))
 
-	// Use database-backed checker with caching
+	// Use database-backed checker with caching and progressive updates
 	results := m.dbChecker.CheckProxiesWithCaching(ctx, proxies)
 	healthyProxies := checker.FilterHealthyProxies(results)
 
@@ -106,9 +132,26 @@ func (m *DBManager) RefreshProxies() error {
 
 	// Update in-memory cache
 	m.mu.Lock()
+	oldCount := len(m.cachedProxies)
 	m.cachedProxies = healthyProxies
 	m.currentIndex = 0
+	newCount := len(m.cachedProxies)
 	m.mu.Unlock()
+
+	log.Printf("Updated proxy cache: %d -> %d healthy proxies", oldCount, newCount)
+
+	// If we have healthy proxies now but had none before, reload from database as well
+	if oldCount == 0 && newCount > 0 {
+		log.Println("Cache was empty but now has proxies, reloading from database to include any existing healthy proxies")
+		if err := m.loadHealthyProxies(); err != nil {
+			log.Printf("Failed to reload from database: %v", err)
+		} else {
+			m.mu.RLock()
+			finalCount := len(m.cachedProxies)
+			m.mu.RUnlock()
+			log.Printf("Final cache count after database reload: %d proxies", finalCount)
+		}
+	}
 
 	// Cleanup old proxies in the background
 	go func() {
@@ -210,12 +253,60 @@ func (m *DBManager) GetStats() Stats {
 		}
 	}
 
+	log.Printf("DEBUG: GetStats() called - cached proxies: %d", len(m.cachedProxies))
 	return stats
 }
 
 // GetDBStats returns detailed database statistics
 func (m *DBManager) GetDBStats(ctx context.Context) (database.ProxyStats, error) {
 	return m.dbChecker.GetStats(ctx)
+}
+
+// backgroundRefresh runs an immediate background refresh (for startup with no proxies)
+func (m *DBManager) backgroundRefresh() {
+	defer m.wg.Done()
+	
+	log.Println("Running background refresh...")
+	if err := m.RefreshProxies(); err != nil {
+		log.Printf("Background refresh failed: %v", err)
+		// If refresh failed, try to load any existing healthy proxies from DB
+		log.Println("Attempting to load healthy proxies from database as fallback...")
+		if err := m.loadHealthyProxies(); err != nil {
+			log.Printf("Fallback load also failed: %v", err)
+		}
+	}
+}
+
+// cacheRefreshLoop periodically reloads healthy proxies from database
+func (m *DBManager) cacheRefreshLoop(ticker *time.Ticker) {
+	defer m.wg.Done()
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			// Only reload if we have few proxies in cache
+			m.mu.RLock()
+			currentCount := len(m.cachedProxies)
+			m.mu.RUnlock()
+			
+			if currentCount < 5 { // Reload if we have fewer than 5 proxies
+				log.Printf("Cache has only %d proxies, reloading from database...", currentCount)
+				if err := m.loadHealthyProxies(); err != nil {
+					log.Printf("Failed to reload cache from database: %v", err)
+				} else {
+					m.mu.RLock()
+					newCount := len(m.cachedProxies)
+					m.mu.RUnlock()
+					if newCount > currentCount {
+						log.Printf("Cache reloaded: %d -> %d proxies", currentCount, newCount)
+					}
+				}
+			}
+		}
+	}
 }
 
 // updateLoop runs the periodic proxy refresh
@@ -227,6 +318,7 @@ func (m *DBManager) updateLoop() {
 		case <-m.ctx.Done():
 			return
 		case <-m.updateTicker.C:
+			log.Println("Running scheduled proxy refresh...")
 			if err := m.RefreshProxies(); err != nil {
 				log.Printf("Failed to refresh proxies: %v", err)
 			}

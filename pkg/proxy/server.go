@@ -114,8 +114,30 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Only handle valid proxy requests
+	if !s.isValidProxyRequest(r) {
+		http.Error(w, "Invalid proxy request", http.StatusBadRequest)
+		return
+	}
+
 	// Handle proxy requests (both HTTP and HTTPS CONNECT)
 	s.handleHTTP(w, r)
+}
+
+// isValidProxyRequest checks if the request is a valid proxy request
+func (s *Server) isValidProxyRequest(r *http.Request) bool {
+	// CONNECT requests are always valid proxy requests
+	if r.Method == http.MethodConnect {
+		return true
+	}
+	
+	// For other methods, the URL must be absolute (have a scheme and host)
+	if r.URL.Scheme != "" && r.URL.Host != "" {
+		return true
+	}
+	
+	// Reject relative URLs (like /favicon.ico, /robots.txt, etc.)
+	return false
 }
 
 func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
@@ -477,14 +499,27 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	managerStats := s.manager.GetStats()
 	serverStats := s.getStats()
 
+	// Try to get database stats if this is a DBManager
+	dbStatsJSON := `"not_available"`
+	if dbManager, ok := s.manager.(*manager.DBManager); ok {
+		if dbStats, err := dbManager.GetDBStats(context.Background()); err == nil {
+			dbStatsJSON = fmt.Sprintf(`{
+				"total_in_db": %d,
+				"healthy_in_db": %d,
+				"by_type": %s
+			}`, dbStats.Total, dbStats.Healthy, formatMap(dbStats.ByType))
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{
 		"proxy_stats": {
-			"total_proxies": %d,
-			"healthy_proxies": %d,
+			"cached_proxies": %d,
+			"cached_healthy": %d,
 			"proxy_types": %s,
 			"proxy_countries": %s
 		},
+		"database_stats": %s,
 		"server_stats": {
 			"requests_handled": %d,
 			"bytes_transferred": %d,
@@ -496,6 +531,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		managerStats.HealthyCount,
 		formatMap(managerStats.TypeCount),
 		formatMap(managerStats.CountryCount),
+		dbStatsJSON,
 		serverStats.RequestsHandled,
 		serverStats.BytesTransferred,
 		serverStats.ActiveConnections,

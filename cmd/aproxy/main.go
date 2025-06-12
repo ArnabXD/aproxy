@@ -78,7 +78,7 @@ func main() {
 	defer db.Close()
 
 	// Use database manager
-	mgr := manager.NewDBManager(db, cfg.Checker.CheckInterval)
+	mgr := manager.NewDBManager(db, cfg.Checker.CheckInterval, cfg.Checker.BackgroundEnabled, cfg.Checker.BatchSize, cfg.Checker.BatchDelay)
 	if err := mgr.Start(cfg.Proxy.UpdateInterval); err != nil {
 		log.Fatalf("Failed to start proxy manager: %v", err)
 	}
@@ -112,13 +112,16 @@ func main() {
 	<-c
 	log.Println("Shutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Stop the manager first to cancel background operations
+	mgr.Stop()
+
+	// Shorter timeout for server shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := server.Stop(ctx); err != nil {
 		log.Printf("Server shutdown error: %v", err)
 	}
 
-	mgr.Stop()
 	log.Println("Shutdown complete")
 }

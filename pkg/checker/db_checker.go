@@ -16,14 +16,18 @@ type DBChecker struct {
 	*Checker
 	dbService     *database.Service
 	checkInterval time.Duration
+	batchSize     int
+	batchDelay    time.Duration
 }
 
 // NewDBChecker creates a new database-backed checker
-func NewDBChecker(dbService *database.Service, checkInterval time.Duration) *DBChecker {
+func NewDBChecker(dbService *database.Service, checkInterval time.Duration, batchSize int, batchDelay time.Duration) *DBChecker {
 	return &DBChecker{
 		Checker:       NewChecker(),
 		dbService:     dbService,
 		checkInterval: checkInterval,
+		batchSize:     batchSize,
+		batchDelay:    batchDelay,
 	}
 }
 
@@ -116,8 +120,8 @@ func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scrap
 		return c.getCachedResults(ctx, dbProxies)
 	}
 
-	// Check the proxies that need checking
-	results := c.Checker.CheckProxies(ctx, proxiesToCheck)
+	// Check the proxies that need checking (progressively in batches)
+	results := c.checkProxiesProgressive(ctx, proxiesToCheck)
 
 	// Batch update database with all results in a single transaction
 	proxyMap := make(map[string]*model.Proxies)
@@ -148,13 +152,38 @@ func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scrap
 		updates[*dbProxy.ID] = dbResult
 	}
 
-	// Execute batch update
+	// Execute batch update in smaller chunks to avoid timeouts
 	if len(updates) > 0 {
-		updateCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if err := c.dbService.BatchUpdateProxyHealth(updateCtx, updates); err != nil {
-			log.Printf("Failed to batch update proxy health: %v", err)
+		const maxBatchSize = 50 // Smaller batch size for faster commits
+		
+		// Process updates in smaller batches
+		updateKeys := make([]int32, 0, len(updates))
+		for id := range updates {
+			updateKeys = append(updateKeys, id)
 		}
-		cancel()
+		
+		for i := 0; i < len(updateKeys); i += maxBatchSize {
+			end := i + maxBatchSize
+			if end > len(updateKeys) {
+				end = len(updateKeys)
+			}
+			
+			// Create smaller batch
+			batchUpdates := make(map[int32]database.CheckResult)
+			for j := i; j < end; j++ {
+				id := updateKeys[j]
+				batchUpdates[id] = updates[id]
+			}
+			
+			// Use longer timeout for database operations
+			updateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := c.dbService.BatchUpdateProxyHealth(updateCtx, batchUpdates); err != nil {
+				log.Printf("Failed to batch update proxy health (batch %d-%d): %v", i, end-1, err)
+			} else {
+				log.Printf("Successfully updated %d proxy health records to database", len(batchUpdates))
+			}
+			cancel()
+		}
 	}
 
 	// Return results for all proxies (mix of fresh checks and cached results)
@@ -298,6 +327,115 @@ func (c *DBChecker) GetHealthyProxiesFromDB(ctx context.Context) ([]scraper.Prox
 // CleanupOldProxies removes proxies that haven't been healthy for a long time
 func (c *DBChecker) CleanupOldProxies(ctx context.Context, maxAge time.Duration) error {
 	return c.dbService.CleanupOldProxies(ctx, maxAge)
+}
+
+// checkProxiesProgressive checks proxies in batches with delays to avoid overwhelming the system
+func (c *DBChecker) checkProxiesProgressive(ctx context.Context, proxies []scraper.Proxy) []CheckResult {
+	if len(proxies) == 0 {
+		return nil
+	}
+
+	var allResults []CheckResult
+	totalBatches := (len(proxies) + c.batchSize - 1) / c.batchSize
+
+	log.Printf("Checking %d proxies in %d batches (batch size: %d, delay: %v)", 
+		len(proxies), totalBatches, c.batchSize, c.batchDelay)
+
+	for i := 0; i < len(proxies); i += c.batchSize {
+		// Check for cancellation before starting each batch
+		select {
+		case <-ctx.Done():
+			log.Printf("Context cancelled before batch %d/%d, stopping progressive checking", i/c.batchSize+1, totalBatches)
+			return allResults
+		default:
+			// Continue with batch
+		}
+
+		// Create batch
+		end := i + c.batchSize
+		if end > len(proxies) {
+			end = len(proxies)
+		}
+		batch := proxies[i:end]
+		batchNum := i/c.batchSize + 1
+
+		log.Printf("Checking batch %d/%d (%d proxies)", batchNum, totalBatches, len(batch))
+
+		// Check batch using original checker
+		batchResults := c.Checker.CheckProxies(ctx, batch)
+		allResults = append(allResults, batchResults...)
+
+		// Save this batch's results to database immediately (but only if context is still active)
+		if len(batchResults) > 0 {
+			select {
+			case <-ctx.Done():
+				// Context cancelled, skip background save
+				log.Printf("Context cancelled, skipping database save for batch %d", batchNum)
+			default:
+				// Context still active, save in background
+				go func(results []CheckResult, batchNumber int) {
+					// Use a short timeout for the background save operation
+					saveCtx, saveCancel := context.WithTimeout(context.Background(), 15*time.Second)
+					defer saveCancel()
+
+					// Update database with this batch's results
+					addresses := make([]string, len(results))
+					for i, result := range results {
+						addresses[i] = result.Proxy.Address()
+					}
+					
+					if dbProxies, err := c.dbService.GetProxiesByAddresses(saveCtx, addresses); err == nil {
+						updates := make(map[int32]database.CheckResult)
+						for _, result := range results {
+							if dbProxy, exists := dbProxies[result.Proxy.Address()]; exists && dbProxy.ID != nil {
+								updates[*dbProxy.ID] = database.CheckResult{
+									Proxy:        result.Proxy,
+									Status:       database.ProxyStatus(result.Status),
+									ResponseTime: result.ResponseTime,
+									Error:        result.Error,
+									CheckedAt:    result.CheckedAt,
+								}
+							}
+						}
+						if len(updates) > 0 {
+							if err := c.dbService.BatchUpdateProxyHealth(saveCtx, updates); err == nil {
+								log.Printf("Saved batch %d results to database (%d records)", batchNumber, len(updates))
+							}
+						}
+					}
+				}(batchResults, batchNum)
+			}
+		}
+
+		// Log progress with healthy count so far
+		healthyCount := 0
+		for _, result := range allResults {
+			if result.Status == StatusHealthy {
+				healthyCount++
+			}
+		}
+		log.Printf("Batch %d/%d complete. Total healthy so far: %d", batchNum, totalBatches, healthyCount)
+
+		// Add delay between batches (except for the last one)
+		if end < len(proxies) {
+			select {
+			case <-ctx.Done():
+				log.Printf("Context cancelled, stopping progressive checking at batch %d/%d with %d healthy proxies found", batchNum, totalBatches, healthyCount)
+				return allResults
+			case <-time.After(c.batchDelay):
+				// Continue to next batch
+			}
+		}
+	}
+
+	healthyCount := 0
+	for _, result := range allResults {
+		if result.Status == StatusHealthy {
+			healthyCount++
+		}
+	}
+	log.Printf("Progressive checking completed: checked %d proxies in %d batches, found %d healthy", len(proxies), totalBatches, healthyCount)
+	return allResults
 }
 
 // GetStats returns database proxy statistics

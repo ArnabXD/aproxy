@@ -74,14 +74,16 @@ docker-compose up
 
 ### Key Features
 
+- **Non-blocking startup**: Server starts immediately with cached proxies, background checking builds proxy pool progressively
 - **Multi-source scraping**: Aggregates proxies from multiple free proxy services
 - **SQLite database**: Persistent proxy storage with intelligent caching (10-minute check intervals)
+- **Progressive health checking**: Checks proxies in small batches with delays to avoid overwhelming system
 - **Smart health monitoring**: Reduces redundant API calls with configurable check intervals
 - **Rotating proxy**: Round-robin and random proxy selection with database persistence
 - **Privacy protection**: Header stripping, user-agent spoofing, connection sanitization
 - **HTTPS support**: CONNECT method tunneling for secure connections
 - **Database statistics**: Real-time proxy pool, database, and server metrics via `/stats` endpoint
-- **Auto-refresh**: Configurable proxy pool updates with persistent health tracking
+- **Background operations**: All proxy scraping and checking happens in background without blocking server
 - **Performance optimized**: Hybrid in-memory + database storage for fast access
 - **Docker support**: Production-ready containerization with persistent volumes
 - **Configuration validation**: Comprehensive validation with helpful error messages
@@ -128,9 +130,14 @@ export APROXY_DATABASE_PATH="/data/aproxy.db"
 - **Server**: Listen address, timeouts, connection limits, protocol support
 - **Proxy**: Update intervals, failure thresholds, recheck timing
 - **Database**: SQLite path, cleanup intervals, max age settings
-- **Checker**: Health check URLs, timeouts, worker pools, intervals
+- **Checker**: Health check URLs, timeouts, worker pools, intervals, batch checking settings
 - **Scraper**: Sources, timeouts, user agents (GitHub sources removed for performance)
 - **Logging**: Levels, formats, file rotation settings
+
+**New Checker Configuration Options:**
+- `checker.batch_size`: Number of proxies to check in each batch (default: 50)
+- `checker.batch_delay`: Delay between batches (default: 30s)
+- `checker.background_enabled`: Enable background checking (default: true)
 
 ### API Endpoints
 
@@ -162,6 +169,9 @@ The SQLite database includes:
 - **Resource limits**: CPU and memory constraints in docker-compose
 
 ### Performance Optimizations
+- **Non-blocking architecture**: Server starts immediately, proxy checking happens in background
+- **Progressive checking**: Proxies checked in small batches with delays to reduce system load
+- **Intelligent caching**: Only checks proxies older than 10 minutes, persists all results including failures
 - **Fixed race conditions**: HTTPS CONNECT bidirectional copying now uses channel coordination
 - **Batch database updates**: Replaced concurrent individual updates with single transaction batches
 - **Removed GitHub sources**: Eliminated high-volume proxy sources to reduce database load

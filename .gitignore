@@ -24,6 +24,7 @@ go.work
 *.db
 *.sqlite
 *.sqlite3
+aproxy.*
 
 # Log files
 *.log
@@ -33,6 +34,8 @@ logs/
 .env
 .env.local
 .env.production
+config.yaml
+config.yml
 
 # IDE files
 .vscode/

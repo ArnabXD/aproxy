@@ -21,15 +21,20 @@ func NewDB(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	// Open SQLite database
-	sqlDB, err := sql.Open("sqlite", dbPath)
+	// Open SQLite database with performance optimizations
+	sqlDB, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(10000)&_pragma=temp_store(MEMORY)&_pragma=busy_timeout(30000)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Configure connection pool
-	sqlDB.SetMaxOpenConns(10)
-	sqlDB.SetMaxIdleConns(5)
+	// Configure connection pool for better concurrency
+	sqlDB.SetMaxOpenConns(1)  // SQLite works better with single connection for WAL mode
+	sqlDB.SetMaxIdleConns(1)
+	
+	// Test the connection
+	if err := sqlDB.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
 
 	db := &DB{DB: sqlDB}
 

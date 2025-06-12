@@ -277,41 +277,33 @@ func (s *Service) CleanupOldProxies(ctx context.Context, maxAge time.Duration) e
 func (s *Service) GetProxyStats(ctx context.Context) (ProxyStats, error) {
 	var stats ProxyStats
 
-	// Count total proxies
-	totalStmt := SELECT(COUNT(table.Proxies.ID)).FROM(table.Proxies)
-	err := totalStmt.QueryContext(ctx, s.db, &stats.Total)
+	// Count total proxies using raw SQL
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM proxies").Scan(&stats.Total)
 	if err != nil {
 		return stats, fmt.Errorf("failed to count total proxies: %w", err)
 	}
 
-	// Count healthy proxies
-	healthyStmt := SELECT(COUNT(table.Proxies.ID)).FROM(table.Proxies).WHERE(
-		table.Proxies.Status.EQ(String("healthy")),
-	)
-	err = healthyStmt.QueryContext(ctx, s.db, &stats.Healthy)
+	// Count healthy proxies using raw SQL
+	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM proxies WHERE status = 'healthy'").Scan(&stats.Healthy)
 	if err != nil {
 		return stats, fmt.Errorf("failed to count healthy proxies: %w", err)
 	}
 
-	// Count by type
-	typeStmt := SELECT(
-		table.Proxies.ProxyType,
-		COUNT(table.Proxies.ID),
-	).FROM(table.Proxies).GROUP_BY(table.Proxies.ProxyType)
-
-	dest := []struct {
-		ProxyType string
-		Count     int
-	}{}
-
-	err = typeStmt.QueryContext(ctx, s.db, &dest)
+	// Count by type using raw SQL
+	rows, err := s.db.QueryContext(ctx, "SELECT proxy_type, COUNT(*) FROM proxies GROUP BY proxy_type")
 	if err != nil {
 		return stats, fmt.Errorf("failed to get proxy types: %w", err)
 	}
+	defer rows.Close()
 
 	stats.ByType = make(map[string]int)
-	for _, row := range dest {
-		stats.ByType[row.ProxyType] = row.Count
+	for rows.Next() {
+		var proxyType string
+		var count int
+		if err := rows.Scan(&proxyType, &count); err != nil {
+			return stats, fmt.Errorf("failed to scan proxy type row: %w", err)
+		}
+		stats.ByType[proxyType] = count
 	}
 
 	return stats, nil

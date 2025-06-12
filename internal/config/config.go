@@ -45,11 +45,14 @@ type ScraperConfig struct {
 }
 
 type CheckerConfig struct {
-	TestURL       string        `mapstructure:"test_url" validate:"required,url"`
-	Timeout       time.Duration `mapstructure:"timeout" validate:"required,min=5s,max=1m"`
-	MaxWorkers    int           `mapstructure:"max_workers" validate:"required,min=1,max=200"`
-	UserAgent     string        `mapstructure:"user_agent" validate:"required,min=10"`
-	CheckInterval time.Duration `mapstructure:"check_interval" validate:"required,min=1m,max=1h"`
+	TestURL           string        `mapstructure:"test_url" validate:"required,url"`
+	Timeout           time.Duration `mapstructure:"timeout" validate:"required,min=5s,max=1m"`
+	MaxWorkers        int           `mapstructure:"max_workers" validate:"required,min=1,max=200"`
+	UserAgent         string        `mapstructure:"user_agent" validate:"required,min=10"`
+	CheckInterval     time.Duration `mapstructure:"check_interval" validate:"required,min=1m,max=1h"`
+	BatchSize         int           `mapstructure:"batch_size" validate:"required,min=10,max=500"`
+	BatchDelay        time.Duration `mapstructure:"batch_delay" validate:"required,min=5s,max=5m"`
+	BackgroundEnabled bool          `mapstructure:"background_enabled"`
 }
 
 type DatabaseConfig struct {
@@ -100,6 +103,9 @@ func setDefaults() {
 	viper.SetDefault("checker.max_workers", 50)
 	viper.SetDefault("checker.user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	viper.SetDefault("checker.check_interval", "10m")
+	viper.SetDefault("checker.batch_size", 50)
+	viper.SetDefault("checker.batch_delay", "30s")
+	viper.SetDefault("checker.background_enabled", true)
 
 	// Database defaults
 	viper.SetDefault("database.path", "./data/aproxy.db")
@@ -206,7 +212,8 @@ func PrintConfig(config *Config) {
 	log.Printf("  Server: %s (HTTPS: %v, SOCKS: %v)", config.Server.ListenAddr, config.Server.EnableHTTPS, config.Server.EnableSOCKS)
 	log.Printf("  Database: %s (Max Age: %v)", config.Database.Path, config.Database.MaxAge)
 	log.Printf("  Proxy Update: %v (Max Failures: %d)", config.Proxy.UpdateInterval, config.Proxy.MaxFailures)
-	log.Printf("  Checker: %d workers, %v timeout", config.Checker.MaxWorkers, config.Checker.Timeout)
+	log.Printf("  Checker: %d workers, %v timeout, batch size: %d, batch delay: %v, background: %v", 
+		config.Checker.MaxWorkers, config.Checker.Timeout, config.Checker.BatchSize, config.Checker.BatchDelay, config.Checker.BackgroundEnabled)
 	log.Printf("  Scraper Sources: %v", config.Scraper.Sources)
 	log.Printf("  Logging: %s level, %s format, file: %s", config.Logging.Level, config.Logging.Format, config.Logging.File)
 }

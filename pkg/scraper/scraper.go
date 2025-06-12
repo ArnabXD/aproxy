@@ -59,18 +59,18 @@ func (p *ProxyScrapeAPI) Scrape(ctx context.Context) ([]Proxy, error) {
 			continue
 		}
 
-		// Filter to only HTTP/HTTPS proxies for now
+		// Include all proxy types - HTTP, HTTPS, and SOCKS
 		httpCount := 0
 		socksCount := 0
 		for _, proxy := range proxies {
+			allProxies = append(allProxies, proxy) // Include all proxies
 			if proxy.Type == "http" || proxy.Type == "https" {
-				allProxies = append(allProxies, proxy)
 				httpCount++
-			} else {
+			} else if proxy.Type == "socks4" || proxy.Type == "socks5" {
 				socksCount++
 			}
 		}
-		log.Printf("ProxyScrape filtered: %d HTTP/HTTPS, %d SOCKS (skipped)", httpCount, socksCount)
+		log.Printf("ProxyScrape collected: %d HTTP/HTTPS, %d SOCKS", httpCount, socksCount)
 	}
 
 	return allProxies, nil

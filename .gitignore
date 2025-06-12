@@ -18,7 +18,7 @@
 go.work
 
 # Built binary
-aproxy
+/aproxy
 
 # Database files
 *.db

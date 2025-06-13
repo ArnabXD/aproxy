@@ -8,7 +8,6 @@ server:
   idle_timeout: "60s"
   max_connections: 1000
   enable_https: true
-  enable_socks: false
   strip_headers:
     - "X-Forwarded-For"
     - "X-Real-IP"
@@ -29,6 +28,7 @@ scraper:
   sources:
     - "proxyscrape"
     - "freeproxylist"
+    - "geonode"
 
 checker:
   test_url: "http://icanhazip.com"
@@ -36,16 +36,20 @@ checker:
   max_workers: 50
   user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
   check_interval: "10m"
+  batch_size: 50
+  batch_delay: "30s"
+  background_enabled: true
 
 database:
   path: "./data/aproxy.db"
   max_age: "24h"
   cleanup_interval: "1h"
 
-logging:
-  level: "info"
-  format: "json"
-  file: "./data/aproxy.log"
-  max_size: 100
-  max_age: 30
-  compress: true
+# Note: File logging is not yet implemented - logs go to stdout only
+# logging:
+#   level: "info"
+#   format: "json"
+#   file: "./data/aproxy.log"
+#   max_size: 100
+#   max_age: 30
+#   compress: true

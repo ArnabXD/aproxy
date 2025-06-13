@@ -35,7 +35,6 @@ type Config struct {
 	IdleTimeout    time.Duration
 	MaxConnections int
 	EnableHTTPS    bool
-	EnableSOCKS    bool
 	MaxRetries     int
 	StripHeaders   []string
 	AddHeaders     map[string]string
@@ -72,7 +71,6 @@ func DefaultConfig() *Config {
 		IdleTimeout:    60 * time.Second,
 		MaxConnections: 1000,
 		EnableHTTPS:    true,
-		EnableSOCKS:    false,
 		MaxRetries:     3,
 		StripHeaders: []string{
 			"X-Forwarded-For",

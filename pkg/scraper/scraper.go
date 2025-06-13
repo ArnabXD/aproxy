@@ -31,8 +31,15 @@ type Scraper interface {
 	Scrape(ctx context.Context) ([]Proxy, error)
 }
 
+type ScraperConfig struct {
+	Timeout   time.Duration
+	UserAgent string
+	Sources   []string
+}
+
 type ProxyScrapeAPI struct {
-	client *http.Client
+	client    *http.Client
+	userAgent string
 }
 
 func NewProxyScrapeAPI() *ProxyScrapeAPI {
@@ -40,6 +47,16 @@ func NewProxyScrapeAPI() *ProxyScrapeAPI {
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+	}
+}
+
+func NewProxyScrapeAPIWithConfig(config ScraperConfig) *ProxyScrapeAPI {
+	return &ProxyScrapeAPI{
+		client: &http.Client{
+			Timeout: config.Timeout,
+		},
+		userAgent: config.UserAgent,
 	}
 }
 
@@ -83,7 +100,7 @@ func (p *ProxyScrapeAPI) scrapeTextURL(ctx context.Context, apiURL string) ([]Pr
 		return nil, err
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", p.userAgent)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -142,7 +159,8 @@ func (p *ProxyScrapeAPI) parseProtocolProxies(reader io.Reader) ([]Proxy, error)
 }
 
 type FreeProxyListScraper struct {
-	client *http.Client
+	client    *http.Client
+	userAgent string
 }
 
 func NewFreeProxyListScraper() *FreeProxyListScraper {
@@ -150,6 +168,16 @@ func NewFreeProxyListScraper() *FreeProxyListScraper {
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+	}
+}
+
+func NewFreeProxyListScraperWithConfig(config ScraperConfig) *FreeProxyListScraper {
+	return &FreeProxyListScraper{
+		client: &http.Client{
+			Timeout: config.Timeout,
+		},
+		userAgent: config.UserAgent,
 	}
 }
 
@@ -183,7 +211,7 @@ func (f *FreeProxyListScraper) scrapeURL(ctx context.Context, apiURL string) ([]
 		return nil, err
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", f.userAgent)
 
 	resp, err := f.client.Do(req)
 	if err != nil {
@@ -254,8 +282,38 @@ func NewMultiScraper() *MultiScraper {
 		scrapers: []Scraper{
 			NewProxyScrapeAPI(),
 			NewFreeProxyListScraper(),
-			NewGeonodeAPIScraper(), // Add the new Geonode API scraper
+			NewGeonodeAPIScraper(),
 		},
+	}
+}
+
+func NewMultiScraperWithConfig(config ScraperConfig) *MultiScraper {
+	var scrapers []Scraper
+	
+	for _, source := range config.Sources {
+		switch source {
+		case "proxyscrape":
+			scrapers = append(scrapers, NewProxyScrapeAPIWithConfig(config))
+		case "freeproxylist":
+			scrapers = append(scrapers, NewFreeProxyListScraperWithConfig(config))
+		case "geonode":
+			scrapers = append(scrapers, NewGeonodeAPIScraperWithConfig(config))
+		case "proxylistorg":
+			scrapers = append(scrapers, NewProxyListOrgScraperWithConfig(config))
+		}
+	}
+	
+	if len(scrapers) == 0 {
+		// Default scrapers if none specified
+		scrapers = []Scraper{
+			NewProxyScrapeAPIWithConfig(config),
+			NewFreeProxyListScraperWithConfig(config),
+			NewGeonodeAPIScraperWithConfig(config),
+		}
+	}
+	
+	return &MultiScraper{
+		scrapers: scrapers,
 	}
 }
 
@@ -291,7 +349,8 @@ func (m *MultiScraper) ScrapeAll(ctx context.Context) ([]Proxy, error) {
 
 // ProxyListOrgScraper scrapes from proxy-list.org
 type ProxyListOrgScraper struct {
-	client *http.Client
+	client    *http.Client
+	userAgent string
 }
 
 func NewProxyListOrgScraper() *ProxyListOrgScraper {
@@ -299,6 +358,16 @@ func NewProxyListOrgScraper() *ProxyListOrgScraper {
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+	}
+}
+
+func NewProxyListOrgScraperWithConfig(config ScraperConfig) *ProxyListOrgScraper {
+	return &ProxyListOrgScraper{
+		client: &http.Client{
+			Timeout: config.Timeout,
+		},
+		userAgent: config.UserAgent,
 	}
 }
 
@@ -330,7 +399,7 @@ func (p *ProxyListOrgScraper) scrapeURL(ctx context.Context, apiURL string) ([]P
 		return nil, err
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", p.userAgent)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -380,7 +449,8 @@ func (p *ProxyListOrgScraper) parseProxies(reader io.Reader, proxyType string) (
 
 // GeonodeAPIScraper scrapes from Geonode free proxy API
 type GeonodeAPIScraper struct {
-	client *http.Client
+	client    *http.Client
+	userAgent string
 }
 
 type GeonodeResponse struct {
@@ -408,8 +478,18 @@ type GeonodeProxy struct {
 func NewGeonodeAPIScraper() *GeonodeAPIScraper {
 	return &GeonodeAPIScraper{
 		client: &http.Client{
-			Timeout: 60 * time.Second, // Longer timeout for large response
+			Timeout: 60 * time.Second,
 		},
+		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+	}
+}
+
+func NewGeonodeAPIScraperWithConfig(config ScraperConfig) *GeonodeAPIScraper {
+	return &GeonodeAPIScraper{
+		client: &http.Client{
+			Timeout: config.Timeout,
+		},
+		userAgent: config.UserAgent,
 	}
 }
 
@@ -426,7 +506,7 @@ func (g *GeonodeAPIScraper) Scrape(ctx context.Context) ([]Proxy, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", g.userAgent)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := g.client.Do(req)

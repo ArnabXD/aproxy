@@ -12,8 +12,10 @@ import (
 
 	"aproxy/internal/config"
 	"aproxy/internal/database"
+	"aproxy/pkg/checker"
 	"aproxy/pkg/manager"
 	"aproxy/pkg/proxy"
+	"aproxy/pkg/scraper"
 )
 
 var (
@@ -80,8 +82,22 @@ func main() {
 	}
 	defer db.Close()
 
-	// Use database manager
-	mgr := manager.NewDBManager(db, cfg.Checker.CheckInterval, cfg.Checker.BackgroundEnabled, cfg.Checker.BatchSize, cfg.Checker.BatchDelay)
+	// Create configuration objects for checker and scraper
+	scraperConfig := scraper.ScraperConfig{
+		Timeout:   cfg.Scraper.Timeout,
+		UserAgent: cfg.Scraper.UserAgent,
+		Sources:   cfg.Scraper.Sources,
+	}
+	
+	checkerConfig := checker.CheckerConfig{
+		TestURL:    cfg.Checker.TestURL,
+		Timeout:    cfg.Checker.Timeout,
+		MaxWorkers: cfg.Checker.MaxWorkers,
+		UserAgent:  cfg.Checker.UserAgent,
+	}
+
+	// Use database manager with configuration
+	mgr := manager.NewDBManagerWithConfig(db, scraperConfig, checkerConfig, cfg.Checker.CheckInterval, cfg.Checker.BackgroundEnabled, cfg.Checker.BatchSize, cfg.Checker.BatchDelay)
 	if err := mgr.Start(cfg.Proxy.UpdateInterval); err != nil {
 		log.Fatalf("Failed to start proxy manager: %v", err)
 	}
@@ -93,7 +109,6 @@ func main() {
 		IdleTimeout:    cfg.Server.IdleTimeout,
 		MaxConnections: cfg.Server.MaxConnections,
 		EnableHTTPS:    cfg.Server.EnableHTTPS,
-		EnableSOCKS:    cfg.Server.EnableSOCKS,
 		MaxRetries:     cfg.Server.MaxRetries,
 		StripHeaders:   cfg.Server.StripHeaders,
 		AddHeaders:     cfg.Server.AddHeaders,

@@ -93,13 +93,6 @@ All configuration options can be set via environment variables using the `APROXY
 - `APROXY_SCRAPER_TIMEOUT`: Scraper request timeout (default: `30s`)
 - `APROXY_SCRAPER_SOURCES`: Comma-separated list of proxy sources (default: `proxyscrape,freeproxylist`)
 
-**Logging Configuration:**
-- `APROXY_LOGGING_LEVEL`: Log level (debug, info, warn, error) (default: `info`)
-- `APROXY_LOGGING_FORMAT`: Log format (json, text) (default: `json`)
-- `APROXY_LOGGING_FILE`: Log file path (default: `./data/aproxy.log`)
-- `APROXY_LOGGING_MAX_SIZE`: Maximum log file size in MB (default: `100`)
-- `APROXY_LOGGING_MAX_AGE`: Maximum log file age in days (default: `30`)
-- `APROXY_LOGGING_COMPRESS`: Compress rotated log files (default: `true`)
 
 ### 3. Command Line Options
 
@@ -337,8 +330,7 @@ Monitor AProxy performance using:
 
 1. **Built-in Stats**: `/stats` endpoint provides real-time metrics
 2. **Health Checks**: `/health` endpoint for uptime monitoring
-3. **Logs**: Structured JSON logging with configurable levels
-4. **Proxy Pool Status**: Real-time proxy health and failure tracking
+3. **Proxy Pool Status**: Real-time proxy health and failure tracking
 
 ## Security Considerations
 

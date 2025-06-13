@@ -31,6 +31,17 @@ func NewDBChecker(dbService *database.Service, checkInterval time.Duration, batc
 	}
 }
 
+// NewDBCheckerWithConfig creates a new database-backed checker with configuration
+func NewDBCheckerWithConfig(dbService *database.Service, checkerConfig CheckerConfig, checkInterval time.Duration, batchSize int, batchDelay time.Duration) *DBChecker {
+	return &DBChecker{
+		Checker:       NewCheckerWithConfig(checkerConfig),
+		dbService:     dbService,
+		checkInterval: checkInterval,
+		batchSize:     batchSize,
+		batchDelay:    batchDelay,
+	}
+}
+
 
 // CheckProxiesWithCaching checks proxies but skips those checked recently
 func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scraper.Proxy) []CheckResult {

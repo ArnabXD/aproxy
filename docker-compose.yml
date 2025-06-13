@@ -37,14 +37,6 @@ services:
       # Scraper configuration
       - APROXY_SCRAPER_TIMEOUT=30s
       - APROXY_SCRAPER_SOURCES=proxyscrape,freeproxylist
-      
-      # Logging configuration
-      - APROXY_LOGGING_LEVEL=info
-      - APROXY_LOGGING_FORMAT=json
-      - APROXY_LOGGING_FILE=/app/data/aproxy.log
-      - APROXY_LOGGING_MAX_SIZE=100
-      - APROXY_LOGGING_MAX_AGE=30
-      - APROXY_LOGGING_COMPRESS=true
     
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]

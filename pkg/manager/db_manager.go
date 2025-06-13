@@ -34,15 +34,15 @@ type DBManager struct {
 	updateInterval    time.Duration
 }
 
-// NewDBManager creates a new database-backed manager
-func NewDBManager(db *database.DB, checkInterval time.Duration, backgroundEnabled bool, batchSize int, batchDelay time.Duration) *DBManager {
+// NewDBManagerWithConfig creates a new database-backed manager with configuration
+func NewDBManagerWithConfig(db *database.DB, scraperConfig scraper.ScraperConfig, checkerConfig checker.CheckerConfig, checkInterval time.Duration, backgroundEnabled bool, batchSize int, batchDelay time.Duration) *DBManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	dbService := database.NewService(db)
-	dbChecker := checker.NewDBChecker(dbService, checkInterval, batchSize, batchDelay)
+	dbChecker := checker.NewDBCheckerWithConfig(dbService, checkerConfig, checkInterval, batchSize, batchDelay)
 
 	return &DBManager{
-		scraper:           scraper.NewMultiScraper(),
+		scraper:           scraper.NewMultiScraperWithConfig(scraperConfig),
 		dbChecker:         dbChecker,
 		dbService:         dbService,
 		ctx:               ctx,
@@ -68,7 +68,7 @@ func (m *DBManager) Start(updateInterval time.Duration) error {
 	// Start background operations if enabled
 	if m.backgroundEnabled {
 		m.logger.InfoBg("Starting background proxy operations...")
-		
+
 		// Start background refresh immediately if we have no proxies
 		if len(m.cachedProxies) == 0 {
 			m.logger.InfoBg("No cached proxies found, starting immediate background refresh...")
@@ -80,7 +80,7 @@ func (m *DBManager) Start(updateInterval time.Duration) error {
 		m.updateTicker = time.NewTicker(updateInterval)
 		m.wg.Add(1)
 		go m.updateLoop()
-		
+
 		// Start periodic cache refresh from database (more frequent than full updates)
 		cacheRefreshTicker := time.NewTicker(1 * time.Minute)
 		m.wg.Add(1)
@@ -267,7 +267,7 @@ func (m *DBManager) GetDBStats(ctx context.Context) (database.ProxyStats, error)
 // backgroundRefresh runs an immediate background refresh (for startup with no proxies)
 func (m *DBManager) backgroundRefresh() {
 	defer m.wg.Done()
-	
+
 	m.logger.InfoBg("Running background refresh...")
 	if err := m.RefreshProxies(); err != nil {
 		m.logger.WarnBg("Background refresh failed: %v", err)
@@ -293,7 +293,7 @@ func (m *DBManager) cacheRefreshLoop(ticker *time.Ticker) {
 			m.mu.RLock()
 			currentCount := len(m.cachedProxies)
 			m.mu.RUnlock()
-			
+
 			if currentCount < 5 { // Reload if we have fewer than 5 proxies
 				m.logger.InfoBg("Cache has only %d proxies, reloading from database...", currentCount)
 				if err := m.loadHealthyProxies(); err != nil {

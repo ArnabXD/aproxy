@@ -17,7 +17,7 @@ type Config struct {
 	Scraper  ScraperConfig  `mapstructure:"scraper" validate:"required"`
 	Checker  CheckerConfig  `mapstructure:"checker" validate:"required"`
 	Database DatabaseConfig `mapstructure:"database" validate:"required"`
-	Logging  LoggingConfig  `mapstructure:"logging" validate:"required"`
+	// Logging  LoggingConfig  `mapstructure:"logging" validate:"required"` // Not implemented yet
 }
 
 type ServerConfig struct {
@@ -27,7 +27,6 @@ type ServerConfig struct {
 	IdleTimeout    time.Duration     `mapstructure:"idle_timeout" validate:"required,min=1s,max=10m"`
 	MaxConnections int               `mapstructure:"max_connections" validate:"required,min=1,max=10000"`
 	EnableHTTPS    bool              `mapstructure:"enable_https"`
-	EnableSOCKS    bool              `mapstructure:"enable_socks"`
 	MaxRetries     int               `mapstructure:"max_retries" validate:"required,min=1,max=10"`
 	StripHeaders   []string          `mapstructure:"strip_headers"`
 	AddHeaders     map[string]string `mapstructure:"add_headers"`
@@ -42,7 +41,7 @@ type ProxyConfig struct {
 type ScraperConfig struct {
 	Timeout   time.Duration `mapstructure:"timeout" validate:"required,min=5s,max=2m"`
 	UserAgent string        `mapstructure:"user_agent" validate:"required,min=10"`
-	Sources   []string      `mapstructure:"sources" validate:"required,min=1,dive,oneof=proxyscrape freeproxylist"`
+	Sources   []string      `mapstructure:"sources" validate:"required,min=1,dive,oneof=proxyscrape freeproxylist geonode proxylistorg"`
 }
 
 type CheckerConfig struct {
@@ -80,7 +79,6 @@ func setDefaults() {
 	viper.SetDefault("server.idle_timeout", "60s")
 	viper.SetDefault("server.max_connections", 1000)
 	viper.SetDefault("server.enable_https", true)
-	viper.SetDefault("server.enable_socks", false)
 	viper.SetDefault("server.max_retries", 3)
 	viper.SetDefault("server.strip_headers", []string{
 		"X-Forwarded-For", "X-Real-IP", "X-Original-IP", "CF-Connecting-IP", "True-Client-IP",
@@ -97,7 +95,7 @@ func setDefaults() {
 	// Scraper defaults
 	viper.SetDefault("scraper.timeout", "30s")
 	viper.SetDefault("scraper.user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	viper.SetDefault("scraper.sources", []string{"proxyscrape", "freeproxylist"})
+	viper.SetDefault("scraper.sources", []string{"proxyscrape", "freeproxylist", "geonode"})
 
 	// Checker defaults
 	viper.SetDefault("checker.test_url", "http://icanhazip.com")
@@ -114,13 +112,13 @@ func setDefaults() {
 	viper.SetDefault("database.max_age", "24h")
 	viper.SetDefault("database.cleanup_interval", "1h")
 
-	// Logging defaults
-	viper.SetDefault("logging.level", "info")
-	viper.SetDefault("logging.format", "json")
-	viper.SetDefault("logging.file", "./data/aproxy.log")
-	viper.SetDefault("logging.max_size", 100)
-	viper.SetDefault("logging.max_age", 30)
-	viper.SetDefault("logging.compress", true)
+	// Logging defaults (not implemented yet)
+	// viper.SetDefault("logging.level", "info")
+	// viper.SetDefault("logging.format", "json")
+	// viper.SetDefault("logging.file", "./data/aproxy.log")
+	// viper.SetDefault("logging.max_size", 100)
+	// viper.SetDefault("logging.max_age", 30)
+	// viper.SetDefault("logging.compress", true)
 }
 
 // LoadConfig loads configuration from multiple sources with validation
@@ -211,11 +209,11 @@ func SaveConfigTemplate(path string) error {
 // PrintConfig displays the current configuration (for debugging)
 func PrintConfig(config *Config) {
 	log.Printf("Configuration loaded:")
-	log.Printf("  Server: %s (HTTPS: %v, SOCKS: %v)", config.Server.ListenAddr, config.Server.EnableHTTPS, config.Server.EnableSOCKS)
+	log.Printf("  Server: %s (HTTPS: %v)", config.Server.ListenAddr, config.Server.EnableHTTPS)
 	log.Printf("  Database: %s (Max Age: %v)", config.Database.Path, config.Database.MaxAge)
 	log.Printf("  Proxy Update: %v (Max Failures: %d)", config.Proxy.UpdateInterval, config.Proxy.MaxFailures)
 	log.Printf("  Checker: %d workers, %v timeout, batch size: %d, batch delay: %v, background: %v", 
 		config.Checker.MaxWorkers, config.Checker.Timeout, config.Checker.BatchSize, config.Checker.BatchDelay, config.Checker.BackgroundEnabled)
 	log.Printf("  Scraper Sources: %v", config.Scraper.Sources)
-	log.Printf("  Logging: %s level, %s format, file: %s", config.Logging.Level, config.Logging.Format, config.Logging.File)
+	// log.Printf("  Logging: %s level, %s format, file: %s", config.Logging.Level, config.Logging.Format, config.Logging.File) // Not implemented
 }

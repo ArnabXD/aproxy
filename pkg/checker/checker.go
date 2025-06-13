@@ -55,12 +55,28 @@ type Checker struct {
 	userAgent  string
 }
 
+type CheckerConfig struct {
+	TestURL    string
+	Timeout    time.Duration
+	MaxWorkers int
+	UserAgent  string
+}
+
 func NewChecker() *Checker {
 	return &Checker{
 		testURL:    "http://httpbin.org/ip",
 		timeout:    20 * time.Second,
-		maxWorkers: 20, // Reduce workers to avoid overwhelming
+		maxWorkers: 20,
 		userAgent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+	}
+}
+
+func NewCheckerWithConfig(config CheckerConfig) *Checker {
+	return &Checker{
+		testURL:    config.TestURL,
+		timeout:    config.Timeout,
+		maxWorkers: config.MaxWorkers,
+		userAgent:  config.UserAgent,
 	}
 }
 

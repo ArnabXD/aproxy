@@ -16,6 +16,8 @@ import (
 	"aproxy/internal/logger"
 	"aproxy/pkg/manager"
 	"aproxy/pkg/scraper"
+
+	netproxy "golang.org/x/net/proxy"
 )
 
 type Server struct {
@@ -108,7 +110,7 @@ func (s *Server) Stop(ctx context.Context) error {
 // ServeHTTP implements http.Handler interface
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reqID := logger.GenerateID()
-	
+
 	// Handle special endpoints
 	if r.Method == "GET" {
 		switch r.URL.Path {
@@ -249,28 +251,52 @@ func (s *Server) handleHTTPSConnect(w http.ResponseWriter, r *http.Request, reqI
 }
 
 func (s *Server) tryProxyHTTPRequest(w http.ResponseWriter, r *http.Request, proxy *scraper.Proxy, reqID string) bool {
+	s.httpLogger.Info(reqID, "Using proxy type: %s (%s:%d)", proxy.Type, proxy.Host, proxy.Port)
 	s.incrementActiveConnections()
 	defer s.decrementActiveConnections()
 
-	proxyURL := fmt.Sprintf("http://%s:%d", proxy.Host, proxy.Port)
-	proxyURLParsed, err := url.Parse(proxyURL)
-	if err != nil {
-		s.httpLogger.Error(reqID, "Invalid proxy URL %s: %v", proxyURL, err)
-		return false
-	}
+	var transport *http.Transport
 
-	transport := &http.Transport{
-		Proxy: http.ProxyURL(proxyURLParsed),
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-		MaxIdleConns:        100,
-		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
+	if proxy.Type == "socks4" || proxy.Type == "socks5" {
+		// Use golang.org/x/net/proxy for SOCKS proxies
+		proxyAddr := fmt.Sprintf("%s:%d", proxy.Host, proxy.Port)
+		dialer, err := netproxy.SOCKS5("tcp", proxyAddr, nil, netproxy.Direct)
+		if err != nil {
+			s.httpLogger.Error(reqID, "Failed to create SOCKS dialer for %s: %v", proxyAddr, err)
+			return false
+		}
+		transport = &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialer.Dial(network, addr)
+			},
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+			MaxIdleConns:        100,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+		}
+	} else {
+		// HTTP/HTTPS proxy (default)
+		proxyURL := fmt.Sprintf("http://%s:%d", proxy.Host, proxy.Port)
+		proxyURLParsed, err := url.Parse(proxyURL)
+		if err != nil {
+			s.httpLogger.Error(reqID, "Invalid proxy URL %s: %v", proxyURL, err)
+			return false
+		}
+		transport = &http.Transport{
+			Proxy: http.ProxyURL(proxyURLParsed),
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+			MaxIdleConns:        100,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+		}
 	}
 
 	client := &http.Client{
@@ -309,10 +335,24 @@ func (s *Server) tryProxyHTTPRequest(w http.ResponseWriter, r *http.Request, pro
 }
 
 func (s *Server) tryHTTPSConnect(w http.ResponseWriter, r *http.Request, proxy *scraper.Proxy, reqID string) bool {
+	s.httpsLogger.Info(reqID, "Using proxy type: %s (%s:%d)", proxy.Type, proxy.Host, proxy.Port)
 	s.incrementActiveConnections()
 	defer s.decrementActiveConnections()
 
-	targetConn, err := net.DialTimeout("tcp", net.JoinHostPort(proxy.Host, fmt.Sprintf("%d", proxy.Port)), 10*time.Second)
+	var targetConn net.Conn
+	var err error
+
+	if proxy.Type == "socks4" || proxy.Type == "socks5" {
+		proxyAddr := fmt.Sprintf("%s:%d", proxy.Host, proxy.Port)
+		dialer, errDial := netproxy.SOCKS5("tcp", proxyAddr, nil, netproxy.Direct)
+		if errDial != nil {
+			s.manager.ReportProxyFailure(*proxy)
+			return false
+		}
+		targetConn, err = dialer.Dial("tcp", r.URL.Host)
+	} else {
+		targetConn, err = net.DialTimeout("tcp", net.JoinHostPort(proxy.Host, fmt.Sprintf("%d", proxy.Port)), 10*time.Second)
+	}
 	if err != nil {
 		s.manager.ReportProxyFailure(*proxy)
 		return false

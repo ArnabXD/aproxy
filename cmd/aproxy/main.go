@@ -112,6 +112,7 @@ func main() {
 		MaxRetries:     cfg.Server.MaxRetries,
 		StripHeaders:   cfg.Server.StripHeaders,
 		AddHeaders:     cfg.Server.AddHeaders,
+		AuthToken:      cfg.Server.AuthToken,
 	}
 
 	server := proxy.NewServer(mgr, proxyConfig)

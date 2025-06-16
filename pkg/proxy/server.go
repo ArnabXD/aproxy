@@ -40,6 +40,7 @@ type Config struct {
 	MaxRetries     int
 	StripHeaders   []string
 	AddHeaders     map[string]string
+	AuthToken      string
 }
 
 type Stats struct {
@@ -119,6 +120,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		case "/health":
 			s.handleHealth(w, r)
+			return
+		}
+	}
+
+	// Check auth token if configured
+	if s.config.AuthToken != "" {
+		authHeader := r.Header.Get("Proxy-Authorization")
+		expectedAuth := "Bearer " + s.config.AuthToken
+		if authHeader != expectedAuth {
+			s.logger.Warn(reqID, "Unauthorized proxy request from %s", r.RemoteAddr)
+			http.Error(w, "Proxy authorization required", http.StatusProxyAuthRequired)
 			return
 		}
 	}

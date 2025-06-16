@@ -30,6 +30,7 @@ type ServerConfig struct {
 	MaxRetries     int               `mapstructure:"max_retries" validate:"required,min=1,max=10"`
 	StripHeaders   []string          `mapstructure:"strip_headers"`
 	AddHeaders     map[string]string `mapstructure:"add_headers"`
+	AuthToken      string            `mapstructure:"auth_token"`
 }
 
 type ProxyConfig struct {

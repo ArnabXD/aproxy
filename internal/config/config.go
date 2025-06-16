@@ -17,7 +17,6 @@ type Config struct {
 	Scraper  ScraperConfig  `mapstructure:"scraper" validate:"required"`
 	Checker  CheckerConfig  `mapstructure:"checker" validate:"required"`
 	Database DatabaseConfig `mapstructure:"database" validate:"required"`
-	// Logging  LoggingConfig  `mapstructure:"logging" validate:"required"` // Not implemented yet
 }
 
 type ServerConfig struct {
@@ -62,14 +61,6 @@ type DatabaseConfig struct {
 	CleanupInterval time.Duration `mapstructure:"cleanup_interval" validate:"required,min=30m,max=24h"`
 }
 
-type LoggingConfig struct {
-	Level    string `mapstructure:"level" validate:"required,oneof=debug info warn error"`
-	Format   string `mapstructure:"format" validate:"required,oneof=json text"`
-	File     string `mapstructure:"file" validate:"required,min=1"`
-	MaxSize  int    `mapstructure:"max_size" validate:"required,min=1,max=1000"`
-	MaxAge   int    `mapstructure:"max_age" validate:"required,min=1,max=365"`
-	Compress bool   `mapstructure:"compress"`
-}
 
 // setDefaults configures default values for viper
 func setDefaults() {
@@ -113,13 +104,6 @@ func setDefaults() {
 	viper.SetDefault("database.max_age", "24h")
 	viper.SetDefault("database.cleanup_interval", "1h")
 
-	// Logging defaults (not implemented yet)
-	// viper.SetDefault("logging.level", "info")
-	// viper.SetDefault("logging.format", "json")
-	// viper.SetDefault("logging.file", "./data/aproxy.log")
-	// viper.SetDefault("logging.max_size", 100)
-	// viper.SetDefault("logging.max_age", 30)
-	// viper.SetDefault("logging.compress", true)
 }
 
 // LoadConfig loads configuration from multiple sources with validation
@@ -216,5 +200,4 @@ func PrintConfig(config *Config) {
 	log.Printf("  Checker: %d workers, %v timeout, batch size: %d, batch delay: %v, background: %v", 
 		config.Checker.MaxWorkers, config.Checker.Timeout, config.Checker.BatchSize, config.Checker.BatchDelay, config.Checker.BackgroundEnabled)
 	log.Printf("  Scraper Sources: %v", config.Scraper.Sources)
-	// log.Printf("  Logging: %s level, %s format, file: %s", config.Logging.Level, config.Logging.Format, config.Logging.File) // Not implemented
 }

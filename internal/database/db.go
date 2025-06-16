@@ -84,23 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_proxies_last_checked ON proxies(last_checked_at);
 CREATE INDEX IF NOT EXISTS idx_proxies_status ON proxies(status);
 
 -- Index for finding proxies by type
-CREATE INDEX IF NOT EXISTS idx_proxies_type ON proxies(proxy_type);
-
--- Proxy check history for detailed analytics (optional, for future use)
-CREATE TABLE IF NOT EXISTS proxy_checks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    proxy_id INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    response_time_ms INTEGER,
-    error_message TEXT,
-    checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    
-    FOREIGN KEY (proxy_id) REFERENCES proxies (id) ON DELETE CASCADE
-);
-
--- Index for proxy check history
-CREATE INDEX IF NOT EXISTS idx_proxy_checks_proxy_id ON proxy_checks(proxy_id);
-CREATE INDEX IF NOT EXISTS idx_proxy_checks_checked_at ON proxy_checks(checked_at);`
+CREATE INDEX IF NOT EXISTS idx_proxies_type ON proxies(proxy_type);`
 
 	_, err := db.Exec(schema)
 	return err

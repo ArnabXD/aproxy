@@ -170,7 +170,6 @@ export APROXY_DATABASE_PATH="/data/aproxy.db"
 
 The SQLite database includes:
 - **proxies table**: Stores proxy details, health status, and timestamps
-- **proxy_checks table**: Historical check data for analytics (optional)
 - **Indexes**: Optimized for fast lookups by host:port, status, and timestamps
 - **Automatic cleanup**: Removes old unhealthy proxies based on configuration
 

@@ -10,8 +10,10 @@ AProxy is a high-performance anonymous proxy server written in Go that automatic
 - **Rotating Proxy Pool**: Round-robin and random proxy selection with automatic refresh
 - **Privacy Protection**: Header stripping, user-agent spoofing, and connection sanitization
 - **HTTPS Support**: CONNECT method tunneling for secure encrypted connections
+- **Authentication Support**: Optional token-based authentication to prevent unauthorized usage
+- **SOCKS Proxy Support**: Full support for SOCKS4 and SOCKS5 proxies with auto-detection
 - **Real-time Statistics**: Live proxy pool, database, and server metrics via REST API
-- **Flexible Configuration**: JSON config files and environment variable support
+- **Flexible Configuration**: YAML config files and environment variable support
 - **Auto-refresh**: Configurable proxy pool updates with health-based filtering
 - **Performance Optimized**: Database-backed caching reduces API calls and improves response times
 
@@ -35,8 +37,11 @@ AProxy is a high-performance anonymous proxy server written in Go that automatic
 
 4. **Use the proxy**
    ```bash
-   # Test with curl
+   # Test with curl (no auth)
    curl -x http://localhost:8080 http://httpbin.org/ip
+   
+   # Test with authentication (if auth_token is configured)
+   curl -x http://localhost:8080 --proxy-header "Proxy-Authorization: Bearer your-token" http://httpbin.org/ip
    
    # Use with any HTTP client
    export HTTP_PROXY=http://localhost:8080
@@ -66,9 +71,9 @@ All configuration options can be set via environment variables using the `APROXY
 **Server Configuration:**
 - `APROXY_SERVER_LISTEN_ADDR`: Server bind address (default: `:8080`)
 - `APROXY_SERVER_ENABLE_HTTPS`: Enable HTTPS CONNECT support (default: `true`)
-- `APROXY_SERVER_ENABLE_SOCKS`: Enable SOCKS proxy support (default: `false`)
 - `APROXY_SERVER_MAX_CONNECTIONS`: Maximum concurrent connections (default: `1000`)
 - `APROXY_SERVER_MAX_RETRIES`: Maximum retry attempts for failed proxies (default: `3`)
+- `APROXY_SERVER_AUTH_TOKEN`: Optional authentication token to prevent unauthorized usage
 
 **Proxy Management:**
 - `APROXY_PROXY_UPDATE_INTERVAL`: Proxy refresh interval (default: `15m`)
@@ -135,6 +140,63 @@ Example database statistics:
 # View database stats via API
 curl http://localhost:8080/stats | jq '.database_stats'
 ```
+
+## Authentication
+
+AProxy supports optional token-based authentication to prevent unauthorized usage:
+
+### Configuration
+
+**Via YAML config:**
+```yaml
+server:
+  auth_token: "your-secret-token-here"
+```
+
+**Via environment variable:**
+```bash
+export APROXY_SERVER_AUTH_TOKEN="your-secret-token-here"
+```
+
+**Via Docker:**
+```bash
+# In .env file
+APROXY_SERVER_AUTH_TOKEN=my-secret-token
+
+# Or as Docker run argument
+docker run -e APROXY_SERVER_AUTH_TOKEN=my-secret-token aproxy
+```
+
+### Client Usage
+
+When authentication is enabled, clients must include the `Proxy-Authorization` header:
+
+```bash
+# curl with authentication
+curl -x http://localhost:8080 \
+     --proxy-header "Proxy-Authorization: Bearer your-secret-token-here" \
+     http://httpbin.org/ip
+
+# Python requests example
+import requests
+
+proxies = {
+    'http': 'http://localhost:8080',
+    'https': 'http://localhost:8080'
+}
+
+headers = {
+    'Proxy-Authorization': 'Bearer your-secret-token-here'
+}
+
+response = requests.get('http://httpbin.org/ip', proxies=proxies, headers=headers)
+```
+
+### Security Notes
+- Authentication is completely optional - if no `auth_token` is configured, the proxy works without authentication
+- Tokens are validated using Bearer token format: `Proxy-Authorization: Bearer <token>`
+- Unauthorized requests receive HTTP 407 Proxy Authentication Required response
+- Use strong, random tokens for production deployments
 
 ## Privacy Features
 

@@ -8,6 +8,9 @@ server:
   idle_timeout: "60s"
   max_connections: 1000
   enable_https: true
+  max_retries: 3
+  # Optional: Require authentication to prevent public usage
+  # auth_token: "your-secret-token-here"
   strip_headers:
     - "X-Forwarded-For"
     - "X-Real-IP"

@@ -6,7 +6,7 @@ require (
 	github.com/go-jet/jet/v2 v2.13.0
 	github.com/go-playground/validator/v10 v10.26.0
 	github.com/spf13/viper v1.20.1
-	golang.org/x/net v0.34.0
+	golang.org/x/net v0.38.0
 	modernc.org/sqlite v1.38.0
 )
 
@@ -34,10 +34,10 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
-	golang.org/x/crypto v0.33.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.65.10 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

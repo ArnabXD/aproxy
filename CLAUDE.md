@@ -179,9 +179,22 @@ curl -x http://localhost:8080 \
 
 ### API Endpoints
 
-- `/`: Main proxy endpoint (HTTP/HTTPS)
-- `/stats`: JSON statistics about proxy pool, database, and server metrics
-- `/health`: Health check endpoint (returns 200 if healthy proxies available, 503 if none)
+- `/`: Main proxy endpoint (HTTP/HTTPS) - requires authentication if configured
+- `/stats`: JSON statistics about proxy pool, database, and server metrics - requires authentication if configured
+- `/proxies`: JSON list of working proxy servers - requires authentication if configured
+- `/health`: Health check endpoint (returns 200 if healthy proxies available, 503 if none) - public, no authentication required
+
+**Authentication:**
+All endpoints except `/health` require Bearer token authentication when `server.auth_token` is configured. Use the `Proxy-Authorization: Bearer <token>` header.
+
+```bash
+# Access protected endpoints with authentication
+curl -H "Proxy-Authorization: Bearer my-secret-token" http://localhost:8080/stats
+curl -H "Proxy-Authorization: Bearer my-secret-token" http://localhost:8080/proxies
+
+# Health endpoint is always public
+curl http://localhost:8080/health
+```
 
 ### Database Schema
 

@@ -88,7 +88,7 @@ func main() {
 		UserAgent: cfg.Scraper.UserAgent,
 		Sources:   cfg.Scraper.Sources,
 	}
-	
+
 	checkerConfig := checker.CheckerConfig{
 		TestURL:    cfg.Checker.TestURL,
 		Timeout:    cfg.Checker.Timeout,

@@ -115,24 +115,29 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Handle special endpoints
 	if r.Method == "GET" {
 		switch r.URL.Path {
-		case "/stats":
-			s.handleStats(w, r)
-			return
 		case "/health":
 			s.handleHealth(w, r)
+			return
+		case "/stats":
+			// Check auth for protected endpoints
+			if !s.checkAuth(w, r, reqID) {
+				return
+			}
+			s.handleStats(w, r)
+			return
+		case "/proxies":
+			// Check auth for protected endpoints
+			if !s.checkAuth(w, r, reqID) {
+				return
+			}
+			s.handleProxies(w, r)
 			return
 		}
 	}
 
-	// Check auth token if configured
-	if s.config.AuthToken != "" {
-		authHeader := r.Header.Get("Proxy-Authorization")
-		expectedAuth := "Bearer " + s.config.AuthToken
-		if authHeader != expectedAuth {
-			s.logger.Warn(reqID, "Unauthorized proxy request from %s", r.RemoteAddr)
-			http.Error(w, "Proxy authorization required", http.StatusProxyAuthRequired)
-			return
-		}
+	// Check auth for proxy requests
+	if !s.checkAuth(w, r, reqID) {
+		return
 	}
 
 	// Only handle valid proxy requests
@@ -146,6 +151,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Handle proxy requests (both HTTP and HTTPS CONNECT)
 	s.handleHTTP(w, r, reqID)
+}
+
+// checkAuth validates authentication for protected endpoints
+func (s *Server) checkAuth(w http.ResponseWriter, r *http.Request, reqID string) bool {
+	if s.config.AuthToken != "" {
+		authHeader := r.Header.Get("Proxy-Authorization")
+		expectedAuth := "Bearer " + s.config.AuthToken
+		if authHeader != expectedAuth {
+			s.logger.Warn(reqID, "Unauthorized request from %s to %s", r.RemoteAddr, r.URL.Path)
+			http.Error(w, "Proxy authorization required", http.StatusProxyAuthRequired)
+			return false
+		}
+	}
+	return true
 }
 
 // isValidProxyRequest checks if the request is a valid proxy request
@@ -557,30 +576,12 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	dbStatsJSON := `"not_available"`
 	if dbManager, ok := s.manager.(*manager.DBManager); ok {
 		if dbStats, err := dbManager.GetDBStats(context.Background()); err == nil {
-			dbStatsJSON = fmt.Sprintf(`{
-				"total_in_db": %d,
-				"healthy_in_db": %d,
-				"by_type": %s
-			}`, dbStats.Total, dbStats.Healthy, formatMap(dbStats.ByType))
+			dbStatsJSON = fmt.Sprintf(`{"total_in_db": %d, "healthy_in_db": %d, "by_type": %s}`, dbStats.Total, dbStats.Healthy, formatMap(dbStats.ByType))
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{
-		"proxy_stats": {
-			"cached_proxies": %d,
-			"cached_healthy": %d,
-			"proxy_types": %s,
-			"proxy_countries": %s
-		},
-		"database_stats": %s,
-		"server_stats": {
-			"requests_handled": %d,
-			"bytes_transferred": %d,
-			"active_connections": %d,
-			"failed_requests": %d
-		}
-	}`,
+	fmt.Fprintf(w, `{"proxy_stats": {"cached_proxies": %d, "cached_healthy": %d, "proxy_types": %s, "proxy_countries": %s}, "database_stats": %s, "server_stats": {"requests_handled": %d, "bytes_transferred": %d, "active_connections": %d, "failed_requests": %d}}`,
 		managerStats.TotalProxies,
 		managerStats.HealthyCount,
 		formatMap(managerStats.TypeCount),
@@ -607,6 +608,39 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "OK - %d healthy proxies available", managerStats.HealthyCount)
+}
+
+func (s *Server) handleProxies(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get healthy proxies from manager
+	var proxies []scraper.Proxy
+	if dbManager, ok := s.manager.(*manager.DBManager); ok {
+		proxies = dbManager.GetHealthyProxies()
+	} else {
+		http.Error(w, "Proxy list not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if len(proxies) == 0 {
+		http.Error(w, "No healthy proxies available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Format proxies as JSON
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"proxies": [`)
+	for i, proxy := range proxies {
+		if i > 0 {
+			fmt.Fprintf(w, `, `)
+		}
+		fmt.Fprintf(w, `{"host": "%s", "port": %d, "type": "%s", "country": "%s", "last_seen": "%s"}`,
+			proxy.Host, proxy.Port, proxy.Type, proxy.Country, proxy.LastSeen.Format("2006-01-02T15:04:05Z"))
+	}
+	fmt.Fprintf(w, `], "count": %d}`, len(proxies))
 }
 
 func formatMap(m map[string]int) string {

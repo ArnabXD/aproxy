@@ -81,6 +81,7 @@ docker-compose up
 - **Smart health monitoring**: Reduces redundant API calls with configurable check intervals
 - **Rotating proxy**: Round-robin and random proxy selection with database persistence
 - **Privacy protection**: Header stripping, user-agent spoofing, connection sanitization
+- **Authentication**: Bearer token authentication for secure proxy access
 - **HTTPS support**: CONNECT method tunneling for secure connections
 - **Database statistics**: Real-time proxy pool, database, and server metrics via `/stats` endpoint
 - **Background operations**: All proxy scraping and checking happens in background without blocking server
@@ -88,12 +89,27 @@ docker-compose up
 - **Docker support**: Production-ready containerization with persistent volumes
 - **Configuration validation**: Comprehensive validation with helpful error messages
 
-### Privacy Features
+### Authentication & Security
 
+**Authentication (✅ IMPLEMENTED):**
+- Bearer token authentication using `server.auth_token` config
+- Client authentication via `Proxy-Authorization: Bearer <token>` header
+- Environment variable support: `APROXY_SERVER_AUTH_TOKEN`
+- Returns 407 Proxy Authentication Required for invalid/missing tokens
+- Authentication failures logged with client IP addresses
+
+**Privacy Features:**
 - Strips identifying headers (X-Forwarded-For, X-Real-IP, etc.)
 - Adds spoofed User-Agent headers
 - Removes server identification headers from responses
 - Supports HTTPS tunneling for encrypted connections
+
+**Security Considerations:**
+- ⚠️ TLS verification disabled (`InsecureSkipVerify: true`) for upstream connections
+- ⚠️ SQLite database stored unencrypted at rest
+- ⚠️ Authentication tokens stored in plain text
+- ⚠️ No built-in rate limiting for authentication attempts
+- ⚠️ Limited audit logging for security events
 
 ### Configuration
 
@@ -116,28 +132,32 @@ AProxy uses **Viper** for advanced configuration management with validation:
 # Use environment variables (Docker-friendly)
 export APROXY_SERVER_LISTEN_ADDR=":9090"
 export APROXY_DATABASE_PATH="/data/aproxy.db"
+export APROXY_SERVER_AUTH_TOKEN="my-secret-token"
 ./aproxy
+
+# Use authenticated proxy with curl
+curl -x http://localhost:8080 \
+  -H "Proxy-Authorization: Bearer my-secret-token" \
+  http://example.com
 ```
 
 **Key Features:**
 - **Validation**: All config values are validated with helpful error messages
 - **Type safety**: Automatic parsing of durations, URLs, file paths
-- **Hot reload**: Config file changes detected automatically (if using file watcher)
 - **Docker-optimized**: Defaults use `./data/` folder for persistent volumes
 - **Environment mapping**: `APROXY_SERVER_LISTEN_ADDR` → `server.listen_addr`
 
 **Configuration Sections:**
-- **Server**: Listen address, timeouts, connection limits, protocol support, header manipulation
+- **Server**: Listen address, timeouts, connection limits, authentication, header manipulation
 - **Proxy**: Update intervals, failure thresholds, recheck timing
 - **Database**: SQLite path, cleanup intervals, max age settings
 - **Checker**: Health check URLs, timeouts, worker pools, intervals, batch checking settings
-- **Scraper**: Sources, timeouts, user agents (GitHub sources removed for performance)
-- **Logging**: Levels, formats, file rotation settings, compression options
+- **Scraper**: Sources, timeouts, user agents
 
 **Server Configuration Options:**
 - `server.listen_addr`: Server bind address (default: `:8080`)
 - `server.enable_https`: Enable HTTPS CONNECT tunneling (default: `true`)
-- `server.enable_socks`: Enable SOCKS proxy support (default: `false`)
+- `server.auth_token`: Optional Bearer token for authentication (default: empty)
 - `server.max_connections`: Maximum concurrent connections (default: `1000`)
 - `server.strip_headers`: Headers to remove for privacy (X-Forwarded-For, X-Real-IP, etc.)
 - `server.add_headers`: Headers to add for spoofing (User-Agent, etc.)
@@ -152,13 +172,10 @@ export APROXY_DATABASE_PATH="/data/aproxy.db"
 - `checker.max_workers`: Concurrent health check workers (default: `50`)
 - `checker.test_url`: URL used to test proxy health (default: `http://icanhazip.com`)
 
-**Logging Configuration Options:**
-- `logging.level`: Log level (debug, info, warn, error) (default: `info`)
-- `logging.format`: Log format (json, text) (default: `json`)
-- `logging.file`: Log file path (default: `./data/aproxy.log`)
-- `logging.max_size`: Maximum log file size in MB (default: `100`)
-- `logging.max_age`: Maximum log file age in days (default: `30`)
-- `logging.compress`: Compress rotated log files (default: `true`)
+**Logging Configuration:**
+- Currently logs to stdout only in JSON format
+- Log level can be controlled via command line or environment variables
+- File-based logging is not yet implemented
 
 ### API Endpoints
 
@@ -213,4 +230,41 @@ The SQLite database includes:
 - All configuration changes should include validation tags
 - Test Docker builds locally before deployment
 - Database migrations handled automatically by schema initialization
-- Optimize claude for minimal token usage
+
+## Testing Notes
+
+Currently, the codebase lacks comprehensive test coverage. When adding tests:
+- Place unit tests alongside source files with `_test.go` suffix
+- Use `go test ./...` to run all tests
+- Consider integration tests for proxy health checking and scraping functionality
+- Mock external dependencies (proxy sources, HTTP clients) for reliable testing
+
+## Code Patterns and Conventions
+
+- **Interface-based design**: Core components implement interfaces (`ProxyManager`, `Scraper`) for testability
+- **Context propagation**: All long-running operations accept and respect `context.Context`
+- **Error wrapping**: Use `fmt.Errorf` with `%w` verb to wrap errors with context
+- **Structured logging**: Use the internal logger package for consistent logging
+- **Configuration validation**: All config structs use validator tags for input validation
+- **Database transactions**: Batch operations use single transactions for consistency
+
+## Current Limitations and TODOs
+
+### Not Yet Implemented:
+- **SOCKS server support**: AProxy can use SOCKS proxies as upstream but cannot act as a SOCKS server
+- **File-based logging**: All logging currently goes to stdout only
+- **Configuration hot reload**: Config changes require application restart
+- **Comprehensive test coverage**: Limited test suite exists
+- **Rate limiting**: No protection against authentication brute force attacks
+- **Token rotation**: No automatic authentication token rotation mechanism
+- **Database encryption**: SQLite database stored in plain text
+- **TLS certificate validation**: Upstream proxy connections skip certificate verification
+- **Advanced audit logging**: Limited security event logging and monitoring
+
+### Security Improvements Needed:
+- Implement rate limiting for authentication attempts
+- Add database encryption at rest
+- Provide option for TLS certificate validation
+- Add comprehensive audit logging
+- Support for token rotation and expiration
+- Secure token storage mechanisms

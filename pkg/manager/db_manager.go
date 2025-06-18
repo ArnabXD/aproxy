@@ -259,6 +259,17 @@ func (m *DBManager) GetStats() Stats {
 	return stats
 }
 
+// GetHealthyProxies returns a copy of all healthy proxies
+func (m *DBManager) GetHealthyProxies() []scraper.Proxy {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Return a copy to avoid external modification
+	proxies := make([]scraper.Proxy, len(m.cachedProxies))
+	copy(proxies, m.cachedProxies)
+	return proxies
+}
+
 // GetDBStats returns detailed database statistics
 func (m *DBManager) GetDBStats(ctx context.Context) (database.ProxyStats, error) {
 	return m.dbChecker.GetStats(ctx)

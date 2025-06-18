@@ -61,7 +61,6 @@ type DatabaseConfig struct {
 	CleanupInterval time.Duration `mapstructure:"cleanup_interval" validate:"required,min=30m,max=24h"`
 }
 
-
 // setDefaults configures default values for viper
 func setDefaults() {
 	// Server defaults
@@ -203,7 +202,7 @@ func PrintConfig(config *Config) {
 	}
 	log.Printf("  Database: %s (Max Age: %v)", config.Database.Path, config.Database.MaxAge)
 	log.Printf("  Proxy Update: %v (Max Failures: %d)", config.Proxy.UpdateInterval, config.Proxy.MaxFailures)
-	log.Printf("  Checker: %d workers, %v timeout, batch size: %d, batch delay: %v, background: %v", 
+	log.Printf("  Checker: %d workers, %v timeout, batch size: %d, batch delay: %v, background: %v",
 		config.Checker.MaxWorkers, config.Checker.Timeout, config.Checker.BatchSize, config.Checker.BatchDelay, config.Checker.BackgroundEnabled)
 	log.Printf("  Scraper Sources: %v", config.Scraper.Sources)
 }

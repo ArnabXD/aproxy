@@ -42,7 +42,6 @@ func NewDBCheckerWithConfig(dbService *database.Service, checkerConfig CheckerCo
 	}
 }
 
-
 // CheckProxiesWithCaching checks proxies but skips those checked recently
 func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scraper.Proxy) []CheckResult {
 	if len(proxies) == 0 {
@@ -98,7 +97,7 @@ func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scrap
 	// Determine which proxies need health checks
 	var proxiesToCheck []scraper.Proxy
 	var proxiesNeedingCheck []*model.Proxies
-	
+
 	for _, dbProxy := range dbProxies {
 		needsCheck := false
 		if dbProxy.LastCheckedAt == nil {
@@ -118,7 +117,7 @@ func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scrap
 			if dbProxy.Country != nil {
 				proxy.Country = *dbProxy.Country
 			}
-			
+
 			proxiesToCheck = append(proxiesToCheck, proxy)
 			proxiesNeedingCheck = append(proxiesNeedingCheck, dbProxy)
 		}
@@ -166,26 +165,26 @@ func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scrap
 	// Execute batch update in smaller chunks to avoid timeouts
 	if len(updates) > 0 {
 		const maxBatchSize = 50 // Smaller batch size for faster commits
-		
+
 		// Process updates in smaller batches
 		updateKeys := make([]int32, 0, len(updates))
 		for id := range updates {
 			updateKeys = append(updateKeys, id)
 		}
-		
+
 		for i := 0; i < len(updateKeys); i += maxBatchSize {
 			end := i + maxBatchSize
 			if end > len(updateKeys) {
 				end = len(updateKeys)
 			}
-			
+
 			// Create smaller batch
 			batchUpdates := make(map[int32]database.CheckResult)
 			for j := i; j < end; j++ {
 				id := updateKeys[j]
 				batchUpdates[id] = updates[id]
 			}
-			
+
 			// Use longer timeout for database operations
 			updateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			if err := c.dbService.BatchUpdateProxyHealth(updateCtx, batchUpdates); err != nil {
@@ -349,7 +348,7 @@ func (c *DBChecker) checkProxiesProgressive(ctx context.Context, proxies []scrap
 	var allResults []CheckResult
 	totalBatches := (len(proxies) + c.batchSize - 1) / c.batchSize
 
-	log.Printf("Checking %d proxies in %d batches (batch size: %d, delay: %v)", 
+	log.Printf("Checking %d proxies in %d batches (batch size: %d, delay: %v)",
 		len(proxies), totalBatches, c.batchSize, c.batchDelay)
 
 	for i := 0; i < len(proxies); i += c.batchSize {
@@ -394,7 +393,7 @@ func (c *DBChecker) checkProxiesProgressive(ctx context.Context, proxies []scrap
 					for i, result := range results {
 						addresses[i] = result.Proxy.Address()
 					}
-					
+
 					if dbProxies, err := c.dbService.GetProxiesByAddresses(saveCtx, addresses); err == nil {
 						updates := make(map[int32]database.CheckResult)
 						for _, result := range results {

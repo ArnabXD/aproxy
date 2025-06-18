@@ -1,5 +1,7 @@
 # AProxy - Anonymous Proxy Server
 
+![AProxy](./assets/images/image.png)
+
 A high-performance proxy server that automatically scrapes, validates, and rotates free proxies. Built for penetration testing, privacy research, and anonymous browsing.
 
 ## What is AProxy?

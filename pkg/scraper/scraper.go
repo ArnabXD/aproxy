@@ -289,7 +289,7 @@ func NewMultiScraper() *MultiScraper {
 
 func NewMultiScraperWithConfig(config ScraperConfig) *MultiScraper {
 	var scrapers []Scraper
-	
+
 	for _, source := range config.Sources {
 		switch source {
 		case "proxyscrape":
@@ -302,7 +302,7 @@ func NewMultiScraperWithConfig(config ScraperConfig) *MultiScraper {
 			scrapers = append(scrapers, NewProxyListOrgScraperWithConfig(config))
 		}
 	}
-	
+
 	if len(scrapers) == 0 {
 		// Default scrapers if none specified
 		scrapers = []Scraper{
@@ -311,7 +311,7 @@ func NewMultiScraperWithConfig(config ScraperConfig) *MultiScraper {
 			NewGeonodeAPIScraperWithConfig(config),
 		}
 	}
-	
+
 	return &MultiScraper{
 		scrapers: scrapers,
 	}

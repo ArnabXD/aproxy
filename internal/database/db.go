@@ -28,9 +28,9 @@ func NewDB(dbPath string) (*DB, error) {
 	}
 
 	// Configure connection pool for better concurrency
-	sqlDB.SetMaxOpenConns(1)  // SQLite works better with single connection for WAL mode
+	sqlDB.SetMaxOpenConns(1) // SQLite works better with single connection for WAL mode
 	sqlDB.SetMaxIdleConns(1)
-	
+
 	// Test the connection
 	if err := sqlDB.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)

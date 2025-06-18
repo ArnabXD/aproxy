@@ -319,13 +319,13 @@ func GroupByStatus(results []CheckResult) map[ProxyStatus][]CheckResult {
 func (c *Checker) testSOCKSProxy(ctx context.Context, proxy scraper.Proxy) (ProxyStatus, error) {
 	// For SOCKS proxies, we'll test by establishing a connection and making a simple HTTP request
 	// This is more complex than HTTP proxies but necessary for proper validation
-	
+
 	if proxy.Type == "socks4" {
 		return c.testSOCKS4Proxy(ctx, proxy)
 	} else if proxy.Type == "socks5" {
 		return c.testSOCKS5Proxy(ctx, proxy)
 	}
-	
+
 	return StatusError, fmt.Errorf("unsupported SOCKS type: %s", proxy.Type)
 }
 
@@ -336,7 +336,7 @@ func (c *Checker) testSOCKS4Proxy(ctx context.Context, proxy scraper.Proxy) (Pro
 	if err != nil {
 		return StatusError, err
 	}
-	
+
 	// Test by connecting to a simple HTTP endpoint through the SOCKS proxy
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -396,7 +396,7 @@ func (c *Checker) testSOCKS5Proxy(ctx context.Context, proxy scraper.Proxy) (Pro
 	if err != nil {
 		return StatusError, err
 	}
-	
+
 	// Test by connecting to a simple HTTP endpoint through the SOCKS proxy
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {

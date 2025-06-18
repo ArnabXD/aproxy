@@ -155,7 +155,7 @@ func (s *Service) BatchUpdateProxyHealth(ctx context.Context, updates map[int32]
 				proxyID,
 			)
 		}
-		
+
 		if err != nil {
 			return fmt.Errorf("failed to update proxy %d: %w", proxyID, err)
 		}
@@ -228,7 +228,7 @@ func (s *Service) GetProxiesByAddresses(ctx context.Context, addresses []string)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan proxy: %w", err)
 		}
-		
+
 		address := fmt.Sprintf("%s:%d", p.Host, p.Port)
 		result[address] = &p
 	}

@@ -78,6 +78,7 @@ func setDefaults() {
 	viper.SetDefault("server.add_headers", map[string]string{
 		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
 	})
+	viper.SetDefault("server.auth_token", "")
 
 	// Proxy defaults
 	viper.SetDefault("proxy.update_interval", "15m")
@@ -195,6 +196,11 @@ func SaveConfigTemplate(path string) error {
 func PrintConfig(config *Config) {
 	log.Printf("Configuration loaded:")
 	log.Printf("  Server: %s (HTTPS: %v)", config.Server.ListenAddr, config.Server.EnableHTTPS)
+	if config.Server.AuthToken != "" {
+		log.Printf("  Auth Token: [SET] (length: %d)", len(config.Server.AuthToken))
+	} else {
+		log.Printf("  Auth Token: [NOT SET]")
+	}
 	log.Printf("  Database: %s (Max Age: %v)", config.Database.Path, config.Database.MaxAge)
 	log.Printf("  Proxy Update: %v (Max Failures: %d)", config.Proxy.UpdateInterval, config.Proxy.MaxFailures)
 	log.Printf("  Checker: %d workers, %v timeout, batch size: %d, batch delay: %v, background: %v", 

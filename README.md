@@ -18,7 +18,7 @@ AProxy aggregates free proxies from multiple sources, validates their health, an
 
 ```bash
 # Clone and build
-git clone <repo-url>
+git clone https://github.com/ArnabXD/aproxy.git
 cd aproxy
 go build -o aproxy ./cmd/aproxy
 

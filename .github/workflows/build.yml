@@ -1,0 +1,134 @@
+name: Build Multi-Platform Binaries
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            binary_name: aproxy-linux-amd64
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            binary_name: aproxy-linux-arm64
+          - os: linux
+            arch: arm
+            runner: ubuntu-latest
+            binary_name: aproxy-linux-arm
+          - os: linux
+            arch: 386
+            runner: ubuntu-latest
+            binary_name: aproxy-linux-386
+
+          # Windows builds
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            binary_name: aproxy-windows-amd64.exe
+          - os: windows
+            arch: 386
+            runner: windows-latest
+            binary_name: aproxy-windows-386.exe
+          - os: windows
+            arch: arm64
+            runner: windows-latest
+            binary_name: aproxy-windows-arm64.exe
+
+          # macOS builds
+          - os: darwin
+            arch: amd64
+            runner: macos-latest
+            binary_name: aproxy-darwin-amd64
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            binary_name: aproxy-darwin-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+          check-latest: true
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 1
+        run: |
+          go build -ldflags="-s -w -X main.version=${{ github.ref_name || 'dev' }}" -o ${{ matrix.binary_name }} ./cmd/aproxy
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.binary_name }}
+          path: ${{ matrix.binary_name }}
+          retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: ./binaries
+
+      - name: Create checksums
+        run: |
+          cd binaries
+          find . -type f -name "aproxy-*" -exec sha256sum {} \; > ../checksums.txt
+          cd ..
+          cat checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            binaries/*/aproxy-*
+            checksums.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

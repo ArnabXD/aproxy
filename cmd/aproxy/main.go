@@ -24,9 +24,12 @@ var (
 	version    = flag.Bool("version", false, "Show version")
 )
 
-const (
+var (
 	Version = "1.0.0"
-	Banner  = `
+)
+
+const (
+	Banner = `
 ______ ______ ______ ______ ______ ______ ______ ______
 
  ▄▄▄       ██▓███   ██▀███   ▒█████  ▒██   ██▒▓██   ██▓

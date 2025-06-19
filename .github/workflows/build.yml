@@ -90,7 +90,7 @@ jobs:
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: 1
         run: |
-          go build -ldflags="-s -w -X main.version=${{ github.ref_name || 'dev' }}" -o ${{ matrix.binary_name }} ./cmd/aproxy
+          go build -ldflags="-s -w" -o ${{ matrix.binary_name }} ./cmd/aproxy
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

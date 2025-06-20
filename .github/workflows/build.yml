@@ -4,8 +4,14 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "**/*.md"
+      - "*.md"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "*.md"
   workflow_dispatch:
 
 permissions:
@@ -15,6 +21,7 @@ jobs:
   build:
     name: Build for ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    if: "!contains(github.event.head_commit.message, '#skip-ci')"
     
     strategy:
       matrix:

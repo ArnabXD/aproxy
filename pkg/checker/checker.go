@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"aproxy/internal/logger"
 	"aproxy/pkg/scraper"
 	netproxy "golang.org/x/net/proxy"
 )
@@ -53,6 +54,7 @@ type Checker struct {
 	timeout    time.Duration
 	maxWorkers int
 	userAgent  string
+	logger     *logger.Logger
 }
 
 type CheckerConfig struct {
@@ -68,6 +70,7 @@ func NewChecker() *Checker {
 		timeout:    20 * time.Second,
 		maxWorkers: 20,
 		userAgent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+		logger:     logger.New("checker"),
 	}
 }
 
@@ -77,6 +80,7 @@ func NewCheckerWithConfig(config CheckerConfig) *Checker {
 		timeout:    config.Timeout,
 		maxWorkers: config.MaxWorkers,
 		userAgent:  config.UserAgent,
+		logger:     logger.New("checker"),
 	}
 }
 
@@ -150,35 +154,16 @@ func (c *Checker) CheckProxies(ctx context.Context, proxies []scraper.Proxy) []C
 
 	var results []CheckResult
 	healthyCount := 0
-	failureCounts := make(map[string]int)
 
 	for result := range resultQueue {
 		results = append(results, result)
 		if result.Status == StatusHealthy {
 			healthyCount++
-		} else {
-			// Count failures by type
-			errType := result.Status.String()
-			if result.Error != nil && strings.Contains(result.Error.Error(), "SOCKS proxy not supported") {
-				errType = "socks_skipped"
-			}
-			failureCounts[errType]++
-
-			// Log first few failures for debugging (but not SOCKS)
-			if errType != "socks_skipped" && failureCounts[errType] <= 3 {
-				fmt.Printf("DEBUG: Proxy %s (%s) failed: %s (error: %v)\n",
-					result.Proxy.Address(), result.Proxy.Type, result.Status.String(), result.Error)
-			}
 		}
 	}
 
-	// Summary of results
 	if len(results) > 0 {
-		fmt.Printf("DEBUG: Results - Healthy: %d", healthyCount)
-		for errType, count := range failureCounts {
-			fmt.Printf(", %s: %d", errType, count)
-		}
-		fmt.Printf(" (total: %d)\n", len(results))
+		c.logger.InfoBg("Proxy check completed: %d healthy out of %d total", healthyCount, len(results))
 	}
 
 	return results
@@ -471,11 +456,11 @@ func TestSingleProxy(host string, port int) {
 	checker := NewChecker()
 	ctx := context.Background()
 
-	fmt.Printf("Testing proxy %s:%d...\n", host, port)
+	checker.logger.InfoBg("Testing proxy %s:%d", host, port)
 	result := checker.CheckProxy(ctx, proxy)
 
-	fmt.Printf("Result: %s (took %v)\n", result.Status.String(), result.ResponseTime)
+	checker.logger.InfoBg("Result: %s (took %v)", result.Status.String(), result.ResponseTime)
 	if result.Error != nil {
-		fmt.Printf("Error: %v\n", result.Error)
+		checker.logger.WarnBg("Error: %v", result.Error)
 	}
 }

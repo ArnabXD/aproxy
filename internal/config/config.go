@@ -41,7 +41,7 @@ type ProxyConfig struct {
 type ScraperConfig struct {
 	Timeout   time.Duration `mapstructure:"timeout" validate:"required,min=5s,max=2m"`
 	UserAgent string        `mapstructure:"user_agent" validate:"required,min=10"`
-	Sources   []string      `mapstructure:"sources" validate:"required,min=1,dive,oneof=proxyscrape freeproxylist geonode proxylistorg"`
+	Sources   []string      `mapstructure:"sources" validate:"required,min=1,dive,oneof=proxyscrape freeproxylist geonode proxylistorg github"`
 }
 
 type CheckerConfig struct {

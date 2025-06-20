@@ -16,6 +16,7 @@ func NewMultiScraper() *MultiScraper {
 			NewProxyScrapeAPI(),
 			NewFreeProxyListScraper(),
 			NewGeonodeAPIScraper(),
+			NewGitHubProxyScraper(),
 		},
 		logger: logger.New("multiscraper"),
 	}
@@ -34,6 +35,8 @@ func NewMultiScraperWithConfig(config ScraperConfig) *MultiScraper {
 			scrapers = append(scrapers, NewGeonodeAPIScraperWithConfig(config))
 		case "proxylistorg":
 			scrapers = append(scrapers, NewProxyListOrgScraperWithConfig(config))
+		case "github":
+			scrapers = append(scrapers, NewGitHubProxyScraperWithConfig(config))
 		}
 	}
 
@@ -42,6 +45,7 @@ func NewMultiScraperWithConfig(config ScraperConfig) *MultiScraper {
 			NewProxyScrapeAPIWithConfig(config),
 			NewFreeProxyListScraperWithConfig(config),
 			NewGeonodeAPIScraperWithConfig(config),
+			NewGitHubProxyScraperWithConfig(config),
 		}
 	}
 

@@ -87,7 +87,7 @@ func setDefaults() {
 	// Scraper defaults
 	viper.SetDefault("scraper.timeout", "30s")
 	viper.SetDefault("scraper.user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	viper.SetDefault("scraper.sources", []string{"proxyscrape", "freeproxylist", "geonode"})
+	viper.SetDefault("scraper.sources", []string{"proxyscrape", "freeproxylist", "geonode", "github"})
 
 	// Checker defaults
 	viper.SetDefault("checker.test_url", "http://icanhazip.com")

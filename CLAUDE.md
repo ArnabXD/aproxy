@@ -65,8 +65,8 @@ docker-compose up
 
 ### Core Components
 
-- **Scraper** (`pkg/scraper/`): Fetches proxy lists from multiple sources (ProxyScrape, FreeProxyList)
-- **Checker** (`pkg/checker/`): Validates proxy health with SQLite caching and intelligent check intervals
+- **Scraper** (`pkg/scraper/`): Fetches proxy lists from multiple sources (ProxyScrape, FreeProxyList, Geonode, ProxyListOrg, GitHub)
+- **Checker** (`pkg/checker/`): Validates proxy health with SQLite caching, intelligent check intervals, and unified logging
 - **Manager** (`pkg/manager/`): Manages proxy pool with database persistence, in-memory cache, and auto-refresh
 - **Database** (`internal/database/`): SQLite-based persistent storage with Jet ORM for type-safe queries
 - **Proxy Server** (`pkg/proxy/`): HTTP/HTTPS proxy server with privacy features
@@ -121,6 +121,13 @@ AProxy uses **Viper** for advanced configuration management with validation:
 3. **Config files**: YAML, JSON, TOML supported (searches `./`, `./config/`, `/etc/aproxy/`)
 4. **Defaults**: Sensible defaults for all settings
 
+**Supported Scraper Sources:**
+- `proxyscrape`: ProxyScrape API
+- `freeproxylist`: FreeProxyList scraper
+- `geonode`: Geonode API scraper  
+- `proxylistorg`: ProxyListOrg scraper
+- `github`: GitHub proxy list scraper (proxifly/free-proxy-list)
+
 **Configuration Management:**
 ```bash
 # Generate sample config file
@@ -172,6 +179,11 @@ curl -x http://localhost:8080 \
 - `checker.max_workers`: Concurrent health check workers (default: `50`)
 - `checker.test_url`: URL used to test proxy health (default: `http://icanhazip.com`)
 
+**Scraper Configuration Options:**
+- `scraper.sources`: List of proxy sources to use (default: `["proxyscrape", "freeproxylist", "geonode", "github"]`)
+- `scraper.timeout`: Request timeout for scraping (default: `30s`)
+- `scraper.user_agent`: User agent string for scraper requests
+
 **Logging Configuration:**
 - Currently logs to stdout only in JSON format
 - Log level can be controlled via command line or environment variables
@@ -204,6 +216,17 @@ The SQLite database includes:
 - **Automatic cleanup**: Removes old unhealthy proxies based on configuration
 
 ## Recent Improvements
+
+### GitHub Proxy Scraper (v1.2)
+- **New GitHub source**: Added scraper for proxifly/free-proxy-list GitHub repository
+- **Enhanced source variety**: Now supports 5 different proxy sources for better diversity
+- **Configuration validation**: Added `github` to allowed scraper sources in config validation
+
+### Logging System Improvements (v1.2)
+- **Unified logging**: Standardized all checker logging to use internal logger package
+- **Reduced verbosity**: Removed verbose individual proxy failure debugging output
+- **Consistent log levels**: Proper use of InfoBg/WarnBg throughout checker components
+- **Better performance**: Less logging overhead during proxy health checks
 
 ### Configuration System (v1.1)
 - **Migrated to Viper**: Replaced manual config parsing with Viper library

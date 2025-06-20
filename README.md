@@ -110,7 +110,7 @@ docker-compose logs -f
 
 ## How It Works
 
-1. **Scraper** fetches proxy lists from multiple free sources (ProxyScrape, FreeProxyList)
+1. **Scraper** fetches proxy lists from multiple free sources (ProxyScrape, FreeProxyList, Geonode, ProxyListOrg, GitHub)
 2. **Health Checker** validates proxies using configurable test URLs
 3. **Database** caches proxy health status to avoid redundant checks
 4. **Manager** maintains pool of healthy proxies with automatic rotation
@@ -160,6 +160,12 @@ docker-compose logs -f
 - `checker.timeout` - Proxy test timeout (default: `15s`)
 - `checker.batch_size` - Proxies per batch (default: `50`)
 - `checker.batch_delay` - Delay between batches (default: `30s`)
+- `checker.background_enabled` - Enable background proxy checking (default: `true`)
+
+### Scraper Sources
+- `scraper.sources` - Proxy sources to use: `proxyscrape`, `freeproxylist`, `geonode`, `proxylistorg`, `github`
+- `scraper.timeout` - Scraper request timeout (default: `30s`)
+- `scraper.user_agent` - User agent for scraping requests
 
 ### Database
 - `database.path` - SQLite file location (default: `./data/aproxy.db`)

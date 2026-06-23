@@ -110,7 +110,7 @@ docker-compose logs -f
 
 ## How It Works
 
-1. **Scraper** fetches proxy lists from multiple free sources (ProxyScrape, FreeProxyList, Geonode, ProxyListOrg, GitHub)
+1. **Scraper** fetches proxy lists from multiple free sources (ProxyScrape, FreeProxyList, ProxyListOrg, GitHub)
 2. **Health Checker** validates proxies using configurable test URLs
 3. **Database** caches proxy health status to avoid redundant checks
 4. **Manager** maintains pool of healthy proxies with automatic rotation
@@ -163,7 +163,7 @@ docker-compose logs -f
 - `checker.background_enabled` - Enable background proxy checking (default: `true`)
 
 ### Scraper Sources
-- `scraper.sources` - Proxy sources to use: `proxyscrape`, `freeproxylist`, `geonode`, `proxylistorg`, `github`
+- `scraper.sources` - Proxy sources to use: `proxyscrape`, `freeproxylist`, `proxylistorg`, `github`
 - `scraper.timeout` - Scraper request timeout (default: `30s`)
 - `scraper.user_agent` - User agent for scraping requests
 
@@ -211,7 +211,7 @@ go build -race -o aproxy ./cmd/aproxy
 
 ## License
 
-MIT License - see LICENSE file for details.
+GPL-3.0 - see LICENSE file for details.
 
 ## Disclaimer
 

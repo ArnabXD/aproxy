@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -166,7 +165,6 @@ func (s *Service) BatchUpdateProxyHealth(ctx context.Context, updates map[int32]
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Printf("Batch updated %d proxy health records", len(updates))
 	return nil
 }
 

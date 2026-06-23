@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -572,24 +573,31 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	managerStats := s.manager.GetStats()
 	serverStats := s.getStats()
 
-	// Try to get database stats
-	dbStatsJSON := `"not_available"`
+	resp := map[string]any{
+		"proxy_stats": map[string]any{
+			"cached_proxies":  managerStats.TotalProxies,
+			"cached_healthy":  managerStats.HealthyCount,
+			"proxy_types":     managerStats.TypeCount,
+			"proxy_countries": managerStats.CountryCount,
+		},
+		"server_stats": map[string]any{
+			"requests_handled":   serverStats.RequestsHandled,
+			"bytes_transferred":  serverStats.BytesTransferred,
+			"active_connections": serverStats.ActiveConnections,
+			"failed_requests":    serverStats.FailedRequests,
+		},
+		"database_stats": "not_available",
+	}
 	if dbStats, err := s.manager.GetDBStats(context.Background()); err == nil {
-		dbStatsJSON = fmt.Sprintf(`{"total_in_db": %d, "healthy_in_db": %d, "by_type": %s}`, dbStats.Total, dbStats.Healthy, formatMap(dbStats.ByType))
+		resp["database_stats"] = map[string]any{
+			"total_in_db":   dbStats.Total,
+			"healthy_in_db": dbStats.Healthy,
+			"by_type":       dbStats.ByType,
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"proxy_stats": {"cached_proxies": %d, "cached_healthy": %d, "proxy_types": %s, "proxy_countries": %s}, "database_stats": %s, "server_stats": {"requests_handled": %d, "bytes_transferred": %d, "active_connections": %d, "failed_requests": %d}}`,
-		managerStats.TotalProxies,
-		managerStats.HealthyCount,
-		formatMap(managerStats.TypeCount),
-		formatMap(managerStats.CountryCount),
-		dbStatsJSON,
-		serverStats.RequestsHandled,
-		serverStats.BytesTransferred,
-		serverStats.ActiveConnections,
-		serverStats.FailedRequests,
-	)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -621,25 +629,19 @@ func (s *Server) handleProxies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Format proxies as JSON
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"proxies": [`)
-	for i, proxy := range proxies {
-		if i > 0 {
-			fmt.Fprintf(w, `, `)
+	list := make([]map[string]any, len(proxies))
+	for i, p := range proxies {
+		list[i] = map[string]any{
+			"host":      p.Host,
+			"port":      p.Port,
+			"type":      p.Type,
+			"country":   p.Country,
+			"last_seen": p.LastSeen.Format("2006-01-02T15:04:05Z"),
 		}
-		fmt.Fprintf(w, `{"host": "%s", "port": %d, "type": "%s", "country": "%s", "last_seen": "%s"}`,
-			proxy.Host, proxy.Port, proxy.Type, proxy.Country, proxy.LastSeen.Format("2006-01-02T15:04:05Z"))
 	}
-	fmt.Fprintf(w, `], "count": %d}`, len(proxies))
-}
 
-func formatMap(m map[string]int) string {
-	var parts []string
-	for k, v := range m {
-		parts = append(parts, fmt.Sprintf(`"%s": %d`, k, v))
-	}
-	return "{" + strings.Join(parts, ", ") + "}"
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"proxies": list, "count": len(proxies)})
 }
 
 func (s *Server) getStats() Stats {

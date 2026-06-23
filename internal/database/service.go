@@ -7,97 +7,100 @@ import (
 	"strings"
 	"time"
 
-	"aproxy/internal/database/models/model"
-	"aproxy/internal/database/models/table"
+	"aproxy/internal/database/db"
 	"aproxy/pkg/scraper"
-
-	. "github.com/go-jet/jet/v2/sqlite"
 )
 
-// Service handles database operations for proxies
+// Proxy is the stored proxy row (re-exported sqlc model).
+type Proxy = db.Proxy
+
+// Service handles database operations for proxies.
 type Service struct {
+	q  *db.Queries
 	db *DB
 }
 
-// NewService creates a new database service
-func NewService(db *DB) *Service {
-	return &Service{db: db}
+// NewService creates a new database service.
+func NewService(database *DB) *Service {
+	return &Service{q: db.New(database), db: database}
 }
 
-// UpsertProxy inserts or updates a proxy in the database
-func (s *Service) UpsertProxy(ctx context.Context, proxy scraper.Proxy) (*model.Proxies, error) {
+// UpsertProxy inserts a proxy or, on host:port conflict, refreshes its metadata
+// (preserving health/timestamp columns).
+func (s *Service) UpsertProxy(ctx context.Context, proxy scraper.Proxy) (*Proxy, error) {
 	country := proxy.Country
-	proxyModel := model.Proxies{
+	p, err := s.q.UpsertProxy(ctx, db.UpsertProxyParams{
 		Host:      proxy.Host,
-		Port:      int32(proxy.Port),
+		Port:      int64(proxy.Port),
 		ProxyType: proxy.Type,
 		Country:   &country,
-		HTTPS:     nil, // Not available in scraper.Proxy
-	}
-
-	// Try to insert, if it fails due to unique constraint, update only metadata (preserve health data)
-	now := time.Now()
-	stmt := table.Proxies.INSERT(
-		table.Proxies.Host,
-		table.Proxies.Port,
-		table.Proxies.ProxyType,
-		table.Proxies.Country,
-		table.Proxies.FirstSeenAt,
-	).VALUES(
-		proxyModel.Host,
-		proxyModel.Port,
-		proxyModel.ProxyType,
-		proxyModel.Country,
-		String(now.Format("2006-01-02 15:04:05")),
-	).ON_CONFLICT(table.Proxies.Host, table.Proxies.Port).DO_UPDATE(SET(
-		table.Proxies.ProxyType.SET(String(proxyModel.ProxyType)),
-		table.Proxies.Country.SET(String(*proxyModel.Country)),
-		// DO NOT update timestamps - preserve existing health check data
-	)).RETURNING(table.Proxies.AllColumns)
-
-	var result model.Proxies
-	err := stmt.QueryContext(ctx, s.db, &result)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to upsert proxy: %w", err)
 	}
-
-	return &result, nil
+	return &p, nil
 }
 
-// GetProxiesNeedingCheck returns proxies that haven't been checked in the last checkInterval
-func (s *Service) GetProxiesNeedingCheck(ctx context.Context, checkInterval time.Duration) ([]model.Proxies, error) {
-	cutoff := time.Now().Add(-checkInterval)
-
-	query := `
-		SELECT id, host, port, proxy_type, country, anonymity, https, status, response_time_ms, fail_count, first_seen_at, last_checked_at, last_healthy_at 
-		FROM proxies 
-		WHERE last_checked_at IS NULL OR last_checked_at < ?
-	`
-
-	rows, err := s.db.QueryContext(ctx, query, cutoff.Format("2006-01-02 15:04:05"))
+// GetHealthyProxies returns all healthy proxies.
+func (s *Service) GetHealthyProxies(ctx context.Context) ([]Proxy, error) {
+	proxies, err := s.q.GetHealthyProxies(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get proxies needing check: %w", err)
+		return nil, fmt.Errorf("failed to get healthy proxies: %w", err)
 	}
-	defer rows.Close()
-
-	var proxies []model.Proxies
-	for rows.Next() {
-		var p model.Proxies
-		err := rows.Scan(
-			&p.ID, &p.Host, &p.Port, &p.ProxyType, &p.Country, &p.Anonymity,
-			&p.HTTPS, &p.Status, &p.ResponseTimeMs, &p.FailCount,
-			&p.FirstSeenAt, &p.LastCheckedAt, &p.LastHealthyAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan proxy: %w", err)
-		}
-		proxies = append(proxies, p)
-	}
-
 	return proxies, nil
 }
 
-// BatchUpdateProxyHealth updates multiple proxy health statuses in a single transaction
+// GetProxyByHostPort finds a proxy by host and port, or returns (nil, nil).
+func (s *Service) GetProxyByHostPort(ctx context.Context, host string, port int) (*Proxy, error) {
+	p, err := s.q.GetProxyByHostPort(ctx, db.GetProxyByHostPortParams{Host: host, Port: int64(port)})
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get proxy: %w", err)
+	}
+	return &p, nil
+}
+
+// GetProxiesByAddresses returns existing proxies for the given host:port keys.
+// Hand-written: sqlc's sqlite engine doesn't support sqlc.slice() for IN lists.
+func (s *Service) GetProxiesByAddresses(ctx context.Context, addresses []string) (map[string]*Proxy, error) {
+	result := make(map[string]*Proxy)
+	if len(addresses) == 0 {
+		return result, nil
+	}
+
+	args := make([]any, len(addresses))
+	placeholders := make([]string, len(addresses))
+	for i, addr := range addresses {
+		placeholders[i] = "?"
+		args[i] = addr
+	}
+	query := `SELECT id, host, port, proxy_type, country, anonymity, https, status,
+		response_time_ms, fail_count, first_seen_at, last_checked_at, last_healthy_at
+		FROM proxies WHERE (host || ':' || port) IN (` + strings.Join(placeholders, ",") + ")"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get proxies by addresses: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var p Proxy
+		if err := rows.Scan(
+			&p.ID, &p.Host, &p.Port, &p.ProxyType, &p.Country, &p.Anonymity,
+			&p.Https, &p.Status, &p.ResponseTimeMs, &p.FailCount,
+			&p.FirstSeenAt, &p.LastCheckedAt, &p.LastHealthyAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan proxy: %w", err)
+		}
+		result[fmt.Sprintf("%s:%d", p.Host, p.Port)] = &p
+	}
+	return result, rows.Err()
+}
+
+// BatchUpdateProxyHealth updates many proxies' health in one transaction.
 func (s *Service) BatchUpdateProxyHealth(ctx context.Context, updates map[int32]CheckResult) error {
 	if len(updates) == 0 {
 		return nil
@@ -109,205 +112,67 @@ func (s *Service) BatchUpdateProxyHealth(ctx context.Context, updates map[int32]
 	}
 	defer tx.Rollback()
 
-	now := time.Now()
-	nowStr := now.Format("2006-01-02 15:04:05")
-
-	// Prepare statements for healthy and unhealthy updates
-	healthyQuery := `
-		UPDATE proxies 
-		SET status = ?, last_checked_at = ?, response_time_ms = ?, last_healthy_at = ?, fail_count = 0
-		WHERE id = ?
-	`
-	unhealthyQuery := `
-		UPDATE proxies 
-		SET status = ?, last_checked_at = ?, response_time_ms = ?, fail_count = fail_count + 1
-		WHERE id = ?
-	`
-
-	healthyStmt, err := tx.Prepare(healthyQuery)
-	if err != nil {
-		return fmt.Errorf("failed to prepare healthy statement: %w", err)
-	}
-	defer healthyStmt.Close()
-
-	unhealthyStmt, err := tx.Prepare(unhealthyQuery)
-	if err != nil {
-		return fmt.Errorf("failed to prepare unhealthy statement: %w", err)
-	}
-	defer unhealthyStmt.Close()
-
-	// Execute all updates
-	for proxyID, result := range updates {
+	qtx := s.q.WithTx(tx)
+	for id, result := range updates {
+		rt := int64(result.ResponseTime.Milliseconds())
 		if result.Status == StatusHealthy {
-			_, err = healthyStmt.Exec(
-				result.Status.String(),
-				nowStr,
-				int32(result.ResponseTime.Milliseconds()),
-				nowStr,
-				proxyID,
-			)
+			err = qtx.MarkProxyHealthy(ctx, db.MarkProxyHealthyParams{
+				Status: result.Status.String(), ResponseTimeMs: &rt, ID: int64(id),
+			})
 		} else {
-			_, err = unhealthyStmt.Exec(
-				result.Status.String(),
-				nowStr,
-				int32(result.ResponseTime.Milliseconds()),
-				proxyID,
-			)
+			err = qtx.MarkProxyUnhealthy(ctx, db.MarkProxyUnhealthyParams{
+				Status: result.Status.String(), ResponseTimeMs: &rt, ID: int64(id),
+			})
 		}
-
 		if err != nil {
-			return fmt.Errorf("failed to update proxy %d: %w", proxyID, err)
+			return fmt.Errorf("failed to update proxy %d: %w", id, err)
 		}
 	}
 
-	// Commit the transaction
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
-
 	return nil
 }
 
-// GetHealthyProxies returns all healthy proxies
-func (s *Service) GetHealthyProxies(ctx context.Context) ([]model.Proxies, error) {
-	stmt := SELECT(
-		table.Proxies.AllColumns,
-	).FROM(
-		table.Proxies,
-	).WHERE(
-		table.Proxies.Status.EQ(String("healthy")),
-	).ORDER_BY(
-		table.Proxies.LastHealthyAt.DESC(),
-	)
-
-	var proxies []model.Proxies
-	err := stmt.QueryContext(ctx, s.db, &proxies)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get healthy proxies: %w", err)
-	}
-
-	return proxies, nil
-}
-
-// GetProxiesByAddresses returns existing proxies for the given host:port addresses
-func (s *Service) GetProxiesByAddresses(ctx context.Context, addresses []string) (map[string]*model.Proxies, error) {
-	if len(addresses) == 0 {
-		return make(map[string]*model.Proxies), nil
-	}
-
-	// Build the query with placeholders
-	query := `
-		SELECT id, host, port, proxy_type, country, anonymity, https, status, response_time_ms, fail_count, first_seen_at, last_checked_at, last_healthy_at
-		FROM proxies 
-		WHERE (host || ':' || port) IN (`
-
-	args := make([]interface{}, len(addresses))
-	placeholders := make([]string, len(addresses))
-	for i, addr := range addresses {
-		placeholders[i] = "?"
-		args[i] = addr
-	}
-	query += strings.Join(placeholders, ",") + ")"
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get proxies by addresses: %w", err)
-	}
-	defer rows.Close()
-
-	result := make(map[string]*model.Proxies)
-	for rows.Next() {
-		var p model.Proxies
-		err := rows.Scan(
-			&p.ID, &p.Host, &p.Port, &p.ProxyType, &p.Country, &p.Anonymity,
-			&p.HTTPS, &p.Status, &p.ResponseTimeMs, &p.FailCount,
-			&p.FirstSeenAt, &p.LastCheckedAt, &p.LastHealthyAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan proxy: %w", err)
-		}
-
-		address := fmt.Sprintf("%s:%d", p.Host, p.Port)
-		result[address] = &p
-	}
-
-	return result, nil
-}
-
-// GetProxyByHostPort finds a proxy by host and port
-func (s *Service) GetProxyByHostPort(ctx context.Context, host string, port int) (*model.Proxies, error) {
-	stmt := SELECT(
-		table.Proxies.AllColumns,
-	).FROM(
-		table.Proxies,
-	).WHERE(
-		table.Proxies.Host.EQ(String(host)).
-			AND(table.Proxies.Port.EQ(Int32(int32(port)))),
-	)
-
-	var proxy model.Proxies
-	err := stmt.QueryContext(ctx, s.db, &proxy)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to get proxy: %w", err)
-	}
-
-	return &proxy, nil
-}
-
-// CleanupOldProxies removes proxies that haven't been healthy for a long time
+// CleanupOldProxies removes proxies that haven't been healthy since maxAge ago.
 func (s *Service) CleanupOldProxies(ctx context.Context, maxAge time.Duration) error {
 	cutoff := time.Now().Add(-maxAge)
-
-	query := `DELETE FROM proxies WHERE last_healthy_at IS NULL OR last_healthy_at < ?`
-
-	_, err := s.db.ExecContext(ctx, query, cutoff.Format("2006-01-02 15:04:05"))
-	if err != nil {
+	if err := s.q.CleanupOldProxies(ctx, &cutoff); err != nil {
 		return fmt.Errorf("failed to cleanup old proxies: %w", err)
 	}
-
 	return nil
 }
 
-// GetProxyStats returns statistics about the proxy database
+// GetProxyStats returns aggregate statistics about the proxy table.
 func (s *Service) GetProxyStats(ctx context.Context) (ProxyStats, error) {
 	var stats ProxyStats
 
-	// Count total proxies using raw SQL
-	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM proxies").Scan(&stats.Total)
+	total, err := s.q.CountProxies(ctx)
 	if err != nil {
 		return stats, fmt.Errorf("failed to count total proxies: %w", err)
 	}
+	stats.Total = int(total)
 
-	// Count healthy proxies using raw SQL
-	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM proxies WHERE status = 'healthy'").Scan(&stats.Healthy)
+	healthy, err := s.q.CountHealthyProxies(ctx)
 	if err != nil {
 		return stats, fmt.Errorf("failed to count healthy proxies: %w", err)
 	}
+	stats.Healthy = int(healthy)
 
-	// Count by type using raw SQL
-	rows, err := s.db.QueryContext(ctx, "SELECT proxy_type, COUNT(*) FROM proxies GROUP BY proxy_type")
+	byType, err := s.q.CountProxiesByType(ctx)
 	if err != nil {
-		return stats, fmt.Errorf("failed to get proxy types: %w", err)
+		return stats, fmt.Errorf("failed to count proxies by type: %w", err)
 	}
-	defer rows.Close()
-
-	stats.ByType = make(map[string]int)
-	for rows.Next() {
-		var proxyType string
-		var count int
-		if err := rows.Scan(&proxyType, &count); err != nil {
-			return stats, fmt.Errorf("failed to scan proxy type row: %w", err)
-		}
-		stats.ByType[proxyType] = count
+	stats.ByType = make(map[string]int, len(byType))
+	for _, row := range byType {
+		stats.ByType[row.ProxyType] = int(row.Count)
 	}
 
 	return stats, nil
 }
 
-// ProxyStats contains statistics about the proxy database
+// ProxyStats contains statistics about the proxy database.
 type ProxyStats struct {
 	Total   int            `json:"total"`
 	Healthy int            `json:"healthy"`

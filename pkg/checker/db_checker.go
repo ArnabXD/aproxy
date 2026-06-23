@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"aproxy/internal/database"
-	"aproxy/internal/database/models/model"
 	"aproxy/internal/logger"
 	"aproxy/pkg/scraper"
 )
@@ -71,7 +70,7 @@ func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scrap
 
 	// Separate new proxies that need to be inserted vs existing ones
 	var newProxies []scraper.Proxy
-	var dbProxies []*model.Proxies
+	var dbProxies []*database.Proxy
 	cutoff := time.Now().Add(-c.checkInterval)
 
 	for addr, proxy := range proxyByAddr {
@@ -96,7 +95,7 @@ func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scrap
 
 	// Determine which proxies need health checks
 	var proxiesToCheck []scraper.Proxy
-	var proxiesNeedingCheck []*model.Proxies
+	var proxiesNeedingCheck []*database.Proxy
 
 	for _, dbProxy := range dbProxies {
 		needsCheck := false
@@ -134,7 +133,7 @@ func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scrap
 	results := c.checkProxiesProgressive(ctx, proxiesToCheck)
 
 	// Batch update database with all results in a single transaction
-	proxyMap := make(map[string]*model.Proxies)
+	proxyMap := make(map[string]*database.Proxy)
 	for _, dbProxy := range proxiesNeedingCheck {
 		addr := fmt.Sprintf("%s:%d", dbProxy.Host, dbProxy.Port)
 		proxyMap[addr] = dbProxy
@@ -159,7 +158,7 @@ func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scrap
 			CheckedAt:    result.CheckedAt,
 		}
 
-		updates[*dbProxy.ID] = dbResult
+		updates[int32(dbProxy.ID)] = dbResult
 	}
 
 	// Execute batch update in smaller chunks to avoid timeouts
@@ -201,7 +200,7 @@ func (c *DBChecker) CheckProxiesWithCaching(ctx context.Context, proxies []scrap
 }
 
 // dbProxyToResult converts a stored proxy row into a cached CheckResult.
-func dbProxyToResult(dbProxy *model.Proxies) CheckResult {
+func dbProxyToResult(dbProxy *database.Proxy) CheckResult {
 	proxy := scraper.Proxy{
 		Host: dbProxy.Host,
 		Port: int(dbProxy.Port),
@@ -234,7 +233,7 @@ func dbProxyToResult(dbProxy *model.Proxies) CheckResult {
 }
 
 // getCachedResults returns cached check results for all proxies
-func (c *DBChecker) getCachedResults(ctx context.Context, dbProxies []*model.Proxies) []CheckResult {
+func (c *DBChecker) getCachedResults(ctx context.Context, dbProxies []*database.Proxy) []CheckResult {
 	results := make([]CheckResult, 0, len(dbProxies))
 	for _, dbProxy := range dbProxies {
 		results = append(results, dbProxyToResult(dbProxy))
@@ -243,7 +242,7 @@ func (c *DBChecker) getCachedResults(ctx context.Context, dbProxies []*model.Pro
 }
 
 // getAllResults combines fresh check results with cached results
-func (c *DBChecker) getAllResults(ctx context.Context, dbProxies []*model.Proxies, freshResults []CheckResult) []CheckResult {
+func (c *DBChecker) getAllResults(ctx context.Context, dbProxies []*database.Proxy, freshResults []CheckResult) []CheckResult {
 	freshMap := make(map[string]CheckResult)
 	for _, result := range freshResults {
 		freshMap[result.Proxy.Address()] = result
@@ -353,8 +352,8 @@ func (c *DBChecker) checkProxiesProgressive(ctx context.Context, proxies []scrap
 					if dbProxies, err := c.dbService.GetProxiesByAddresses(saveCtx, addresses); err == nil {
 						updates := make(map[int32]database.CheckResult)
 						for _, result := range results {
-							if dbProxy, exists := dbProxies[result.Proxy.Address()]; exists && dbProxy.ID != nil {
-								updates[*dbProxy.ID] = database.CheckResult{
+							if dbProxy, exists := dbProxies[result.Proxy.Address()]; exists {
+								updates[int32(dbProxy.ID)] = database.CheckResult{
 									Proxy:        result.Proxy,
 									Status:       database.ProxyStatus(result.Status),
 									ResponseTime: result.ResponseTime,

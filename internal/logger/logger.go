@@ -56,3 +56,9 @@ func (l *Logger) DebugBg(msg string, args ...any) { l.log.Debug(fmt.Sprintf(msg,
 func (l *Logger) InfoBg(msg string, args ...any)  { l.log.Info(fmt.Sprintf(msg, args...)) }
 func (l *Logger) WarnBg(msg string, args ...any)  { l.log.Warn(fmt.Sprintf(msg, args...)) }
 func (l *Logger) ErrorBg(msg string, args ...any) { l.log.Error(fmt.Sprintf(msg, args...)) }
+
+// Fatal logs at error level then exits non-zero, mirroring stdlib log.Fatalf.
+func (l *Logger) Fatal(msg string, args ...any) {
+	l.log.Error(fmt.Sprintf(msg, args...))
+	os.Exit(1)
+}

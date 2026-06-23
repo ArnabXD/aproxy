@@ -2,14 +2,17 @@ package config
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
 
+	"aproxy/internal/logger"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/spf13/viper"
 )
+
+var log = logger.New("config")
 
 type Config struct {
 	Server   ServerConfig   `mapstructure:"server" validate:"required"`
@@ -128,7 +131,7 @@ func LoadConfig(configPath string) (*Config, error) {
 		viper.SetConfigFile(".env")
 		viper.SetConfigType("env")
 		if err := viper.MergeInConfig(); err != nil {
-			log.Printf("Warning: Failed to load .env file: %v", err)
+			log.WarnBg("Failed to load .env file: %v", err)
 		}
 	}
 
@@ -142,7 +145,7 @@ func LoadConfig(configPath string) (*Config, error) {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
 		// Config file not found, use defaults and env vars
-		log.Println("No config file found, using defaults and environment variables")
+		log.InfoBg("No config file found, using defaults and environment variables")
 	}
 
 	// Unmarshal configuration
@@ -191,18 +194,18 @@ func SaveConfigTemplate(path string) error {
 	return nil
 }
 
-// PrintConfig displays the current configuration (for debugging)
+// PrintConfig logs the loaded configuration (for debugging).
 func PrintConfig(config *Config) {
-	log.Printf("Configuration loaded:")
-	log.Printf("  Server: %s (HTTPS: %v)", config.Server.ListenAddr, config.Server.EnableHTTPS)
+	authToken := "[NOT SET]"
 	if config.Server.AuthToken != "" {
-		log.Printf("  Auth Token: [SET] (length: %d)", len(config.Server.AuthToken))
-	} else {
-		log.Printf("  Auth Token: [NOT SET]")
+		authToken = fmt.Sprintf("[SET] (length: %d)", len(config.Server.AuthToken))
 	}
-	log.Printf("  Database: %s (Max Age: %v)", config.Database.Path, config.Database.MaxAge)
-	log.Printf("  Proxy Update: %v (Max Failures: %d)", config.Proxy.UpdateInterval, config.Proxy.MaxFailures)
-	log.Printf("  Checker: %d workers, %v timeout, batch size: %d, batch delay: %v, background: %v",
-		config.Checker.MaxWorkers, config.Checker.Timeout, config.Checker.BatchSize, config.Checker.BatchDelay, config.Checker.BackgroundEnabled)
-	log.Printf("  Scraper Sources: %v", config.Scraper.Sources)
+	log.InfoBg("Configuration loaded: server=%s https=%v auth=%s db=%s maxAge=%v "+
+		"proxyUpdate=%v maxFailures=%d checker=%dw/%v batch=%d/%v bg=%v sources=%v",
+		config.Server.ListenAddr, config.Server.EnableHTTPS, authToken,
+		config.Database.Path, config.Database.MaxAge,
+		config.Proxy.UpdateInterval, config.Proxy.MaxFailures,
+		config.Checker.MaxWorkers, config.Checker.Timeout,
+		config.Checker.BatchSize, config.Checker.BatchDelay, config.Checker.BackgroundEnabled,
+		config.Scraper.Sources)
 }

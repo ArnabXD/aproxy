@@ -10,7 +10,7 @@ type MultiScraper struct {
 	logger   *logger.Logger
 }
 
-func NewMultiScraperWithConfig(config ScraperConfig) *MultiScraper {
+func NewMultiScraper(config ScraperConfig) *MultiScraper {
 	enabled := make(map[string]bool, len(config.Sources))
 	for _, s := range config.Sources {
 		enabled[s] = true

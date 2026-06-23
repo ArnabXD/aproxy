@@ -100,7 +100,7 @@ func main() {
 	}
 
 	// Use database manager with configuration
-	mgr := manager.NewDBManagerWithConfig(db, scraperConfig, checkerConfig, cfg.Checker.CheckInterval, cfg.Checker.BackgroundEnabled, cfg.Checker.BatchSize, cfg.Checker.BatchDelay)
+	mgr := manager.NewDBManager(db, scraperConfig, checkerConfig, cfg.Checker.CheckInterval, cfg.Checker.BackgroundEnabled, cfg.Checker.BatchSize, cfg.Checker.BatchDelay)
 	if err := mgr.Start(cfg.Proxy.UpdateInterval); err != nil {
 		log.Fatalf("Failed to start proxy manager: %v", err)
 	}

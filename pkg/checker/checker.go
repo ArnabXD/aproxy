@@ -64,7 +64,7 @@ type CheckerConfig struct {
 	UserAgent  string
 }
 
-func NewCheckerWithConfig(config CheckerConfig) *Checker {
+func NewChecker(config CheckerConfig) *Checker {
 	return &Checker{
 		testURL:    config.TestURL,
 		timeout:    config.Timeout,

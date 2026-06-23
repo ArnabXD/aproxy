@@ -42,15 +42,15 @@ type DBManager struct {
 	updateInterval    time.Duration
 }
 
-// NewDBManagerWithConfig creates a new database-backed manager with configuration
-func NewDBManagerWithConfig(db *database.DB, scraperConfig scraper.ScraperConfig, checkerConfig checker.CheckerConfig, checkInterval time.Duration, backgroundEnabled bool, batchSize int, batchDelay time.Duration) *DBManager {
+// NewDBManager creates a new database-backed manager with configuration
+func NewDBManager(db *database.DB, scraperConfig scraper.ScraperConfig, checkerConfig checker.CheckerConfig, checkInterval time.Duration, backgroundEnabled bool, batchSize int, batchDelay time.Duration) *DBManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	dbService := database.NewService(db)
-	dbChecker := checker.NewDBCheckerWithConfig(dbService, checkerConfig, checkInterval, batchSize, batchDelay)
+	dbChecker := checker.NewDBChecker(dbService, checkerConfig, checkInterval, batchSize, batchDelay)
 
 	return &DBManager{
-		scraper:           scraper.NewMultiScraperWithConfig(scraperConfig),
+		scraper:           scraper.NewMultiScraper(scraperConfig),
 		dbChecker:         dbChecker,
 		dbService:         dbService,
 		ctx:               ctx,

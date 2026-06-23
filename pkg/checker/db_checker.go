@@ -29,10 +29,10 @@ type DBChecker struct {
 	logger        *logger.Logger
 }
 
-// NewDBCheckerWithConfig creates a new database-backed checker with configuration
-func NewDBCheckerWithConfig(dbService *database.Service, checkerConfig CheckerConfig, checkInterval time.Duration, batchSize int, batchDelay time.Duration) *DBChecker {
+// NewDBChecker creates a new database-backed checker with configuration
+func NewDBChecker(dbService *database.Service, checkerConfig CheckerConfig, checkInterval time.Duration, batchSize int, batchDelay time.Duration) *DBChecker {
 	return &DBChecker{
-		Checker:       NewCheckerWithConfig(checkerConfig),
+		Checker:       NewChecker(checkerConfig),
 		dbService:     dbService,
 		checkInterval: checkInterval,
 		batchSize:     batchSize,

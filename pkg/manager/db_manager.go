@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"aproxy/internal/config"
 	"aproxy/internal/database"
 	"aproxy/internal/logger"
 	"aproxy/pkg/checker"
@@ -43,20 +44,20 @@ type DBManager struct {
 }
 
 // NewDBManager creates a new database-backed manager with configuration
-func NewDBManager(db *database.DB, scraperConfig scraper.ScraperConfig, checkerConfig checker.CheckerConfig, checkInterval time.Duration, backgroundEnabled bool, batchSize int, batchDelay time.Duration) *DBManager {
+func NewDBManager(db *database.DB, cfg *config.Config) *DBManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	dbService := database.NewService(db)
-	dbChecker := checker.NewDBChecker(dbService, checkerConfig, checkInterval, batchSize, batchDelay)
+	dbChecker := checker.NewDBChecker(dbService, cfg.Checker)
 
 	return &DBManager{
-		scraper:           scraper.NewMultiScraper(scraperConfig),
+		scraper:           scraper.NewMultiScraper(cfg.Scraper),
 		dbChecker:         dbChecker,
 		dbService:         dbService,
 		ctx:               ctx,
 		cancel:            cancel,
 		cachedProxies:     make([]scraper.Proxy, 0),
-		backgroundEnabled: backgroundEnabled,
+		backgroundEnabled: cfg.Checker.BackgroundEnabled,
 		logger:            logger.New("manager"),
 	}
 }

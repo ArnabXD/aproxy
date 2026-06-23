@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"aproxy/internal/config"
 	"aproxy/internal/logger"
 	"aproxy/pkg/scraper"
 	netproxy "golang.org/x/net/proxy"
@@ -57,14 +58,7 @@ type Checker struct {
 	logger     *logger.Logger
 }
 
-type CheckerConfig struct {
-	TestURL    string
-	Timeout    time.Duration
-	MaxWorkers int
-	UserAgent  string
-}
-
-func NewChecker(config CheckerConfig) *Checker {
+func NewChecker(config config.CheckerConfig) *Checker {
 	return &Checker{
 		testURL:    config.TestURL,
 		timeout:    config.Timeout,

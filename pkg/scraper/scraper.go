@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"aproxy/internal/config"
 	"aproxy/internal/logger"
 	"context"
 )
@@ -10,7 +11,7 @@ type MultiScraper struct {
 	logger   *logger.Logger
 }
 
-func NewMultiScraper(config ScraperConfig) *MultiScraper {
+func NewMultiScraper(config config.ScraperConfig) *MultiScraper {
 	enabled := make(map[string]bool, len(config.Sources))
 	for _, s := range config.Sources {
 		enabled[s] = true

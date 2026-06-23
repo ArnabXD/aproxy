@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"aproxy/internal/config"
 	"aproxy/internal/logger"
 	"bufio"
 	"context"
@@ -60,7 +61,7 @@ type listScraper struct {
 	logger    *logger.Logger
 }
 
-func newListScraper(src source, config ScraperConfig) *listScraper {
+func newListScraper(src source, config config.ScraperConfig) *listScraper {
 	return &listScraper{
 		src:       src,
 		client:    &http.Client{Timeout: config.Timeout},

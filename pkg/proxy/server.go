@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"aproxy/internal/config"
 	"aproxy/internal/logger"
 	"aproxy/pkg/manager"
 	"aproxy/pkg/scraper"
@@ -24,24 +25,11 @@ import (
 type Server struct {
 	manager     *manager.DBManager
 	server      *http.Server
-	config      *Config
+	config      config.ServerConfig
 	stats       *Stats
 	logger      *logger.Logger
 	httpLogger  *logger.Logger
 	httpsLogger *logger.Logger
-}
-
-type Config struct {
-	ListenAddr     string
-	ReadTimeout    time.Duration
-	WriteTimeout   time.Duration
-	IdleTimeout    time.Duration
-	MaxConnections int
-	EnableHTTPS    bool
-	MaxRetries     int
-	StripHeaders   []string
-	AddHeaders     map[string]string
-	AuthToken      string
 }
 
 type Stats struct {
@@ -52,11 +40,7 @@ type Stats struct {
 	mu                sync.RWMutex
 }
 
-func NewServer(mgr *manager.DBManager, config *Config) *Server {
-	if config == nil {
-		config = DefaultConfig()
-	}
-
+func NewServer(mgr *manager.DBManager, config config.ServerConfig) *Server {
 	return &Server{
 		manager:     mgr,
 		config:      config,
@@ -64,28 +48,6 @@ func NewServer(mgr *manager.DBManager, config *Config) *Server {
 		logger:      logger.New("server"),
 		httpLogger:  logger.New("http"),
 		httpsLogger: logger.New("https"),
-	}
-}
-
-func DefaultConfig() *Config {
-	return &Config{
-		ListenAddr:     ":8080",
-		ReadTimeout:    30 * time.Second,
-		WriteTimeout:   30 * time.Second,
-		IdleTimeout:    60 * time.Second,
-		MaxConnections: 1000,
-		EnableHTTPS:    true,
-		MaxRetries:     3,
-		StripHeaders: []string{
-			"X-Forwarded-For",
-			"X-Real-IP",
-			"X-Original-IP",
-			"CF-Connecting-IP",
-			"True-Client-IP",
-		},
-		AddHeaders: map[string]string{
-			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-		},
 	}
 }
 

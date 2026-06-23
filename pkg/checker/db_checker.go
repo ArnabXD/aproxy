@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"aproxy/internal/config"
 	"aproxy/internal/database"
 	"aproxy/internal/logger"
 	"aproxy/pkg/scraper"
@@ -30,13 +31,13 @@ type DBChecker struct {
 }
 
 // NewDBChecker creates a new database-backed checker with configuration
-func NewDBChecker(dbService *database.Service, checkerConfig CheckerConfig, checkInterval time.Duration, batchSize int, batchDelay time.Duration) *DBChecker {
+func NewDBChecker(dbService *database.Service, cfg config.CheckerConfig) *DBChecker {
 	return &DBChecker{
-		Checker:       NewChecker(checkerConfig),
+		Checker:       NewChecker(cfg),
 		dbService:     dbService,
-		checkInterval: checkInterval,
-		batchSize:     batchSize,
-		batchDelay:    batchDelay,
+		checkInterval: cfg.CheckInterval,
+		batchSize:     cfg.BatchSize,
+		batchDelay:    cfg.BatchDelay,
 		logger:        logger.New("db-checker"),
 	}
 }

@@ -22,9 +22,3 @@ type Scraper interface {
 	Name() string
 	Scrape(ctx context.Context) ([]Proxy, error)
 }
-
-type ScraperConfig struct {
-	Timeout   time.Duration
-	UserAgent string
-	Sources   []string
-}

@@ -1,0 +1,19 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    schema: "internal/database/schema.sql"
+    queries: "internal/database/query.sql"
+    gen:
+      go:
+        package: "db"
+        out: "internal/database/db"
+        emit_json_tags: false
+        emit_pointers_for_null_types: true
+        overrides:
+          - db_type: "DATETIME"
+            go_type: "time.Time"
+          - db_type: "DATETIME"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true

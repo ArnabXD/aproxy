@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"aproxy/internal/config"
 	"aproxy/internal/logger"
 	"aproxy/pkg/manager"
 	"aproxy/pkg/scraper"
@@ -21,26 +23,13 @@ import (
 )
 
 type Server struct {
-	manager     manager.ProxyManager
+	manager     *manager.DBManager
 	server      *http.Server
-	config      *Config
+	config      config.ServerConfig
 	stats       *Stats
 	logger      *logger.Logger
 	httpLogger  *logger.Logger
 	httpsLogger *logger.Logger
-}
-
-type Config struct {
-	ListenAddr     string
-	ReadTimeout    time.Duration
-	WriteTimeout   time.Duration
-	IdleTimeout    time.Duration
-	MaxConnections int
-	EnableHTTPS    bool
-	MaxRetries     int
-	StripHeaders   []string
-	AddHeaders     map[string]string
-	AuthToken      string
 }
 
 type Stats struct {
@@ -51,11 +40,7 @@ type Stats struct {
 	mu                sync.RWMutex
 }
 
-func NewServer(mgr manager.ProxyManager, config *Config) *Server {
-	if config == nil {
-		config = DefaultConfig()
-	}
-
+func NewServer(mgr *manager.DBManager, config config.ServerConfig) *Server {
 	return &Server{
 		manager:     mgr,
 		config:      config,
@@ -63,28 +48,6 @@ func NewServer(mgr manager.ProxyManager, config *Config) *Server {
 		logger:      logger.New("server"),
 		httpLogger:  logger.New("http"),
 		httpsLogger: logger.New("https"),
-	}
-}
-
-func DefaultConfig() *Config {
-	return &Config{
-		ListenAddr:     ":8080",
-		ReadTimeout:    30 * time.Second,
-		WriteTimeout:   30 * time.Second,
-		IdleTimeout:    60 * time.Second,
-		MaxConnections: 1000,
-		EnableHTTPS:    true,
-		MaxRetries:     3,
-		StripHeaders: []string{
-			"X-Forwarded-For",
-			"X-Real-IP",
-			"X-Original-IP",
-			"CF-Connecting-IP",
-			"True-Client-IP",
-		},
-		AddHeaders: map[string]string{
-			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-		},
 	}
 }
 
@@ -572,26 +535,31 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	managerStats := s.manager.GetStats()
 	serverStats := s.getStats()
 
-	// Try to get database stats if this is a DBManager
-	dbStatsJSON := `"not_available"`
-	if dbManager, ok := s.manager.(*manager.DBManager); ok {
-		if dbStats, err := dbManager.GetDBStats(context.Background()); err == nil {
-			dbStatsJSON = fmt.Sprintf(`{"total_in_db": %d, "healthy_in_db": %d, "by_type": %s}`, dbStats.Total, dbStats.Healthy, formatMap(dbStats.ByType))
+	resp := map[string]any{
+		"proxy_stats": map[string]any{
+			"cached_proxies":  managerStats.TotalProxies,
+			"cached_healthy":  managerStats.HealthyCount,
+			"proxy_types":     managerStats.TypeCount,
+			"proxy_countries": managerStats.CountryCount,
+		},
+		"server_stats": map[string]any{
+			"requests_handled":   serverStats.RequestsHandled,
+			"bytes_transferred":  serverStats.BytesTransferred,
+			"active_connections": serverStats.ActiveConnections,
+			"failed_requests":    serverStats.FailedRequests,
+		},
+		"database_stats": "not_available",
+	}
+	if dbStats, err := s.manager.GetDBStats(context.Background()); err == nil {
+		resp["database_stats"] = map[string]any{
+			"total_in_db":   dbStats.Total,
+			"healthy_in_db": dbStats.Healthy,
+			"by_type":       dbStats.ByType,
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"proxy_stats": {"cached_proxies": %d, "cached_healthy": %d, "proxy_types": %s, "proxy_countries": %s}, "database_stats": %s, "server_stats": {"requests_handled": %d, "bytes_transferred": %d, "active_connections": %d, "failed_requests": %d}}`,
-		managerStats.TotalProxies,
-		managerStats.HealthyCount,
-		formatMap(managerStats.TypeCount),
-		formatMap(managerStats.CountryCount),
-		dbStatsJSON,
-		serverStats.RequestsHandled,
-		serverStats.BytesTransferred,
-		serverStats.ActiveConnections,
-		serverStats.FailedRequests,
-	)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -616,39 +584,26 @@ func (s *Server) handleProxies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get healthy proxies from manager
-	var proxies []scraper.Proxy
-	if dbManager, ok := s.manager.(*manager.DBManager); ok {
-		proxies = dbManager.GetHealthyProxies()
-	} else {
-		http.Error(w, "Proxy list not available", http.StatusServiceUnavailable)
-		return
-	}
+	proxies := s.manager.GetHealthyProxies()
 
 	if len(proxies) == 0 {
 		http.Error(w, "No healthy proxies available", http.StatusServiceUnavailable)
 		return
 	}
 
-	// Format proxies as JSON
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"proxies": [`)
-	for i, proxy := range proxies {
-		if i > 0 {
-			fmt.Fprintf(w, `, `)
+	list := make([]map[string]any, len(proxies))
+	for i, p := range proxies {
+		list[i] = map[string]any{
+			"host":      p.Host,
+			"port":      p.Port,
+			"type":      p.Type,
+			"country":   p.Country,
+			"last_seen": p.LastSeen.Format("2006-01-02T15:04:05Z"),
 		}
-		fmt.Fprintf(w, `{"host": "%s", "port": %d, "type": "%s", "country": "%s", "last_seen": "%s"}`,
-			proxy.Host, proxy.Port, proxy.Type, proxy.Country, proxy.LastSeen.Format("2006-01-02T15:04:05Z"))
 	}
-	fmt.Fprintf(w, `], "count": %d}`, len(proxies))
-}
 
-func formatMap(m map[string]int) string {
-	var parts []string
-	for k, v := range m {
-		parts = append(parts, fmt.Sprintf(`"%s": %d`, k, v))
-	}
-	return "{" + strings.Join(parts, ", ") + "}"
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"proxies": list, "count": len(proxies)})
 }
 
 func (s *Server) getStats() Stats {

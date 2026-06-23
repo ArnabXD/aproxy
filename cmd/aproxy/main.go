@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,10 +11,9 @@ import (
 
 	"aproxy/internal/config"
 	"aproxy/internal/database"
-	"aproxy/pkg/checker"
+	"aproxy/internal/logger"
 	"aproxy/pkg/manager"
 	"aproxy/pkg/proxy"
-	"aproxy/pkg/scraper"
 )
 
 var (
@@ -24,9 +22,8 @@ var (
 	version    = flag.Bool("version", false, "Show version")
 )
 
-var (
-	Version = "1.0.0"
-)
+// Version is set at build time via -ldflags "-X main.Version=...".
+var Version = "dev"
 
 const (
 	Banner = `
@@ -44,7 +41,7 @@ ______ ______ ______ ______ ______ ______ ______ ______
                                                ░ ░     
 ______ ______ ______ ______ ______ ______ ______ ______
 
-AProxy - Anonymous Proxy Server v%s
+AProxy - Anonymous Proxy Server %s
 https://github.com/ArnabXD/aproxy
 
 ______ ______ ______ ______ ______ ______ ______ ______
@@ -56,15 +53,17 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("AProxy v%s\n", Version)
+		fmt.Printf("AProxy %s\n", Version)
 		return
 	}
 
 	fmt.Printf(Banner, Version)
 
+	log := logger.New("main")
+
 	if *genConfig {
 		if err := config.SaveConfigTemplate("config.yaml"); err != nil {
-			log.Fatalf("Failed to generate config: %v", err)
+			log.Fatal("Failed to generate config: %v", err)
 		}
 		fmt.Println("Default config generated: config.yaml")
 		return
@@ -72,68 +71,40 @@ func main() {
 
 	cfg, err := config.LoadConfig(*configPath)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Fatal("Failed to load config: %v", err)
 	}
 
-	log.Printf("Starting AProxy v%s", Version)
+	log.InfoBg("Starting AProxy %s", Version)
 	config.PrintConfig(cfg)
 
 	// Initialize database
 	db, err := database.NewDB(cfg.Database.Path)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		log.Fatal("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
 
-	// Create configuration objects for checker and scraper
-	scraperConfig := scraper.ScraperConfig{
-		Timeout:   cfg.Scraper.Timeout,
-		UserAgent: cfg.Scraper.UserAgent,
-		Sources:   cfg.Scraper.Sources,
-	}
-
-	checkerConfig := checker.CheckerConfig{
-		TestURL:    cfg.Checker.TestURL,
-		Timeout:    cfg.Checker.Timeout,
-		MaxWorkers: cfg.Checker.MaxWorkers,
-		UserAgent:  cfg.Checker.UserAgent,
-	}
-
-	// Use database manager with configuration
-	mgr := manager.NewDBManagerWithConfig(db, scraperConfig, checkerConfig, cfg.Checker.CheckInterval, cfg.Checker.BackgroundEnabled, cfg.Checker.BatchSize, cfg.Checker.BatchDelay)
+	mgr := manager.NewDBManager(db, cfg)
 	if err := mgr.Start(cfg.Proxy.UpdateInterval); err != nil {
-		log.Fatalf("Failed to start proxy manager: %v", err)
+		log.Fatal("Failed to start proxy manager: %v", err)
 	}
 
-	proxyConfig := &proxy.Config{
-		ListenAddr:     cfg.Server.ListenAddr,
-		ReadTimeout:    cfg.Server.ReadTimeout,
-		WriteTimeout:   cfg.Server.WriteTimeout,
-		IdleTimeout:    cfg.Server.IdleTimeout,
-		MaxConnections: cfg.Server.MaxConnections,
-		EnableHTTPS:    cfg.Server.EnableHTTPS,
-		MaxRetries:     cfg.Server.MaxRetries,
-		StripHeaders:   cfg.Server.StripHeaders,
-		AddHeaders:     cfg.Server.AddHeaders,
-		AuthToken:      cfg.Server.AuthToken,
-	}
-
-	server := proxy.NewServer(mgr, proxyConfig)
+	server := proxy.NewServer(mgr, cfg.Server)
 
 	go func() {
 		if err := server.Start(); err != nil {
-			log.Printf("Server error: %v", err)
+			log.ErrorBg("Server error: %v", err)
 		}
 	}()
 
-	log.Printf("Proxy server started on %s", cfg.Server.ListenAddr)
-	log.Println("Press Ctrl+C to stop")
+	log.InfoBg("Proxy server started on %s", cfg.Server.ListenAddr)
+	log.InfoBg("Press Ctrl+C to stop")
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
 	<-c
-	log.Println("Shutting down...")
+	log.InfoBg("Shutting down...")
 
 	// Stop the manager first to cancel background operations
 	mgr.Stop()
@@ -143,8 +114,8 @@ func main() {
 	defer cancel()
 
 	if err := server.Stop(ctx); err != nil {
-		log.Printf("Server shutdown error: %v", err)
+		log.ErrorBg("Server shutdown error: %v", err)
 	}
 
-	log.Println("Shutdown complete")
+	log.InfoBg("Shutdown complete")
 }

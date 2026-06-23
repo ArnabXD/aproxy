@@ -1,77 +1,64 @@
 package logger
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 )
 
-// Logger provides structured logging across the application
+// slog handler shared by all component loggers. JSON to stdout, honoring LOG_LEVEL.
+var handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: levelFromEnv()})
+
+func levelFromEnv() slog.Level {
+	switch os.Getenv("LOG_LEVEL") {
+	case "debug", "DEBUG":
+		return slog.LevelDebug
+	case "warn", "WARN":
+		return slog.LevelWarn
+	case "error", "ERROR":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+// Logger is a thin component-scoped facade over log/slog.
 type Logger struct {
-	component string
+	log *slog.Logger
 }
 
-// New creates a new logger for a specific component
+// New creates a logger tagged with the given component.
 func New(component string) *Logger {
-	return &Logger{component: component}
+	return &Logger{log: slog.New(handler).With("component", component)}
 }
 
-// GenerateID creates a short unique identifier for request/operation tracing
+// GenerateID creates a short unique identifier for request/operation tracing.
 func GenerateID() string {
-	bytes := make([]byte, 4)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
+	b := make([]byte, 4)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
-// Log writes a structured log message with fixed-width formatting
-func (l *Logger) Log(id, level, message string, args ...interface{}) {
-	formattedMsg := fmt.Sprintf(message, args...)
-	log.Printf("[%s] [%-5s] [%-8s] %s", id, level, l.component, formattedMsg)
+func (l *Logger) at(level slog.Level, id, msg string, args ...any) {
+	l.log.Log(context.Background(), level, fmt.Sprintf(msg, args...), "id", id)
 }
 
-// Debug logs debug level messages
-func (l *Logger) Debug(id, message string, args ...interface{}) {
-	l.Log(id, "DEBUG", message, args...)
-}
+func (l *Logger) Debug(id, msg string, args ...any) { l.at(slog.LevelDebug, id, msg, args...) }
+func (l *Logger) Info(id, msg string, args ...any)  { l.at(slog.LevelInfo, id, msg, args...) }
+func (l *Logger) Warn(id, msg string, args ...any)  { l.at(slog.LevelWarn, id, msg, args...) }
+func (l *Logger) Error(id, msg string, args ...any) { l.at(slog.LevelError, id, msg, args...) }
 
-// Info logs info level messages
-func (l *Logger) Info(id, message string, args ...interface{}) {
-	l.Log(id, "INFO", message, args...)
-}
+// *Bg variants are for background/non-correlated operations (no trace id).
+func (l *Logger) DebugBg(msg string, args ...any) { l.log.Debug(fmt.Sprintf(msg, args...)) }
+func (l *Logger) InfoBg(msg string, args ...any)  { l.log.Info(fmt.Sprintf(msg, args...)) }
+func (l *Logger) WarnBg(msg string, args ...any)  { l.log.Warn(fmt.Sprintf(msg, args...)) }
+func (l *Logger) ErrorBg(msg string, args ...any) { l.log.Error(fmt.Sprintf(msg, args...)) }
 
-// Warn logs warning level messages
-func (l *Logger) Warn(id, message string, args ...interface{}) {
-	l.Log(id, "WARN", message, args...)
-}
-
-// Error logs error level messages
-func (l *Logger) Error(id, message string, args ...interface{}) {
-	l.Log(id, "ERROR", message, args...)
-}
-
-// LogWithoutID logs without an ID (for background operations)
-func (l *Logger) LogWithoutID(level, message string, args ...interface{}) {
-	formattedMsg := fmt.Sprintf(message, args...)
-	log.Printf("[xxxxxxxx] [%-5s] [%-8s] %s", level, l.component, formattedMsg)
-}
-
-// DebugBg logs debug messages for background operations
-func (l *Logger) DebugBg(message string, args ...interface{}) {
-	l.LogWithoutID("DEBUG", message, args...)
-}
-
-// InfoBg logs info messages for background operations
-func (l *Logger) InfoBg(message string, args ...interface{}) {
-	l.LogWithoutID("INFO", message, args...)
-}
-
-// WarnBg logs warning messages for background operations
-func (l *Logger) WarnBg(message string, args ...interface{}) {
-	l.LogWithoutID("WARN", message, args...)
-}
-
-// ErrorBg logs error messages for background operations
-func (l *Logger) ErrorBg(message string, args ...interface{}) {
-	l.LogWithoutID("ERROR", message, args...)
+// Fatal logs at error level then exits non-zero, mirroring stdlib log.Fatalf.
+func (l *Logger) Fatal(msg string, args ...any) {
+	l.log.Error(fmt.Sprintf(msg, args...))
+	os.Exit(1)
 }

@@ -7,11 +7,20 @@ import (
 	"sync"
 	"time"
 
+	"aproxy/internal/config"
 	"aproxy/internal/database"
 	"aproxy/internal/logger"
 	"aproxy/pkg/checker"
 	"aproxy/pkg/scraper"
 )
+
+// Stats summarizes the in-memory proxy pool.
+type Stats struct {
+	TotalProxies int
+	HealthyCount int
+	TypeCount    map[string]int
+	CountryCount map[string]int
+}
 
 // DBManager is a manager that uses SQLite for persistent proxy storage
 type DBManager struct {
@@ -34,21 +43,21 @@ type DBManager struct {
 	updateInterval    time.Duration
 }
 
-// NewDBManagerWithConfig creates a new database-backed manager with configuration
-func NewDBManagerWithConfig(db *database.DB, scraperConfig scraper.ScraperConfig, checkerConfig checker.CheckerConfig, checkInterval time.Duration, backgroundEnabled bool, batchSize int, batchDelay time.Duration) *DBManager {
+// NewDBManager creates a new database-backed manager with configuration
+func NewDBManager(db *database.DB, cfg *config.Config) *DBManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	dbService := database.NewService(db)
-	dbChecker := checker.NewDBCheckerWithConfig(dbService, checkerConfig, checkInterval, batchSize, batchDelay)
+	dbChecker := checker.NewDBChecker(dbService, cfg.Checker)
 
 	return &DBManager{
-		scraper:           scraper.NewMultiScraperWithConfig(scraperConfig),
+		scraper:           scraper.NewMultiScraper(cfg.Scraper),
 		dbChecker:         dbChecker,
 		dbService:         dbService,
 		ctx:               ctx,
 		cancel:            cancel,
 		cachedProxies:     make([]scraper.Proxy, 0),
-		backgroundEnabled: backgroundEnabled,
+		backgroundEnabled: cfg.Checker.BackgroundEnabled,
 		logger:            logger.New("manager"),
 	}
 }

@@ -148,27 +148,19 @@ func (c *Checker) CheckProxies(ctx context.Context, proxies []scraper.Proxy) []C
 }
 
 func (c *Checker) testProxy(ctx context.Context, proxy scraper.Proxy) (ProxyStatus, error) {
-	// Handle SOCKS proxies with specialized testing
-	if proxy.Type == "socks4" || proxy.Type == "socks5" {
-		return c.testSOCKSProxy(ctx, proxy)
-	}
-
-	proxyURL, err := c.buildProxyURL(proxy)
+	transport, err := c.buildTransport(proxy)
 	if err != nil {
 		return StatusError, err
 	}
+	return c.runCheck(ctx, transport)
+}
 
-	// Create a more permissive transport
+// buildTransport returns an http.Transport routed through the given proxy,
+// for HTTP/HTTPS proxies (via Proxy URL) or SOCKS proxies (via a SOCKS dialer).
+func (c *Checker) buildTransport(proxy scraper.Proxy) (*http.Transport, error) {
 	transport := &http.Transport{
-		Proxy: http.ProxyURL(proxyURL),
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 0, // Disable keep-alive for proxy checks
-		}).DialContext,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-		DisableKeepAlives:     true, // Important for proxy testing
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+		DisableKeepAlives:     true,
 		DisableCompression:    true,
 		MaxIdleConns:          0,
 		IdleConnTimeout:       1 * time.Second,
@@ -177,20 +169,44 @@ func (c *Checker) testProxy(ctx context.Context, proxy scraper.Proxy) (ProxyStat
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 
+	if proxy.Type == "socks4" || proxy.Type == "socks5" {
+		// ponytail: x/net/proxy has no SOCKS4 dialer, so socks4 is probed via
+		// the SOCKS5 handshake. A pure-SOCKS4 proxy will fail this and be marked
+		// unhealthy — acceptable; swap in a socks4 dialer if you need them.
+		dialer, err := createSOCKSDialer(proxy.Host, proxy.Port)
+		if err != nil {
+			return nil, err
+		}
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.Dial(network, addr)
+		}
+		return transport, nil
+	}
+
+	// HTTP/HTTPS proxy.
+	proxyURL, err := url.Parse(fmt.Sprintf("http://%s:%d", proxy.Host, proxy.Port))
+	if err != nil {
+		return nil, err
+	}
+	transport.Proxy = http.ProxyURL(proxyURL)
+	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 0}).DialContext
+	return transport, nil
+}
+
+// runCheck issues the test request over the transport and classifies the result.
+func (c *Checker) runCheck(ctx context.Context, transport *http.Transport) (ProxyStatus, error) {
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   c.timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse // Don't follow redirects
+			return http.ErrUseLastResponse
 		},
 	}
 
-	// Use a simple, reliable test URL
 	req, err := http.NewRequestWithContext(ctx, "GET", c.testURL, nil)
 	if err != nil {
 		return StatusError, err
 	}
-
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "text/plain, application/json")
 	req.Header.Set("Connection", "close")
@@ -200,7 +216,6 @@ func (c *Checker) testProxy(ctx context.Context, proxy scraper.Proxy) (ProxyStat
 		if isTimeoutError(err) {
 			return StatusTimeout, err
 		}
-		// Check for common connection errors
 		if isConnectionError(err) {
 			return StatusUnhealthy, err
 		}
@@ -208,28 +223,10 @@ func (c *Checker) testProxy(ctx context.Context, proxy scraper.Proxy) (ProxyStat
 	}
 	defer resp.Body.Close()
 
-	// Accept any 2xx status code
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return StatusHealthy, nil
 	}
-
 	return StatusUnhealthy, fmt.Errorf("HTTP %d", resp.StatusCode)
-}
-
-func (c *Checker) buildProxyURL(proxy scraper.Proxy) (*url.URL, error) {
-	var scheme string
-	switch proxy.Type {
-	case "http", "https":
-		scheme = "http"
-	case "socks4":
-		scheme = "socks4"
-	case "socks5":
-		scheme = "socks5"
-	default:
-		scheme = "http"
-	}
-
-	return url.Parse(fmt.Sprintf("%s://%s:%d", scheme, proxy.Host, proxy.Port))
 }
 
 func isTimeoutError(err error) bool {
@@ -258,140 +255,6 @@ func FilterHealthyProxies(results []CheckResult) []scraper.Proxy {
 		}
 	}
 	return healthy
-}
-
-// testSOCKSProxy tests SOCKS4 and SOCKS5 proxies
-func (c *Checker) testSOCKSProxy(ctx context.Context, proxy scraper.Proxy) (ProxyStatus, error) {
-	// For SOCKS proxies, we'll test by establishing a connection and making a simple HTTP request
-	// This is more complex than HTTP proxies but necessary for proper validation
-
-	if proxy.Type == "socks4" {
-		return c.testSOCKS4Proxy(ctx, proxy)
-	} else if proxy.Type == "socks5" {
-		return c.testSOCKS5Proxy(ctx, proxy)
-	}
-
-	return StatusError, fmt.Errorf("unsupported SOCKS type: %s", proxy.Type)
-}
-
-// testSOCKS4Proxy tests a SOCKS4 proxy by making a connection
-func (c *Checker) testSOCKS4Proxy(ctx context.Context, proxy scraper.Proxy) (ProxyStatus, error) {
-	// Create a dialer that uses the SOCKS4 proxy (note: we'll use SOCKS5 for SOCKS4 as it's more widely supported)
-	dialer, err := createSOCKSDialer(proxy.Host, proxy.Port)
-	if err != nil {
-		return StatusError, err
-	}
-
-	// Test by connecting to a simple HTTP endpoint through the SOCKS proxy
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.Dial(network, addr)
-		},
-		DisableKeepAlives:     true,
-		DisableCompression:    true,
-		MaxIdleConns:          0,
-		IdleConnTimeout:       1 * time.Second,
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   c.timeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	// Make a simple HTTP request through the SOCKS proxy
-	req, err := http.NewRequestWithContext(ctx, "GET", c.testURL, nil)
-	if err != nil {
-		return StatusError, err
-	}
-
-	req.Header.Set("User-Agent", c.userAgent)
-	req.Header.Set("Accept", "text/plain, application/json")
-	req.Header.Set("Connection", "close")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		if isTimeoutError(err) {
-			return StatusTimeout, err
-		}
-		if isConnectionError(err) {
-			return StatusUnhealthy, err
-		}
-		return StatusError, err
-	}
-	defer resp.Body.Close()
-
-	// Accept any 2xx status code
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return StatusHealthy, nil
-	}
-
-	return StatusUnhealthy, fmt.Errorf("HTTP %d", resp.StatusCode)
-}
-
-// testSOCKS5Proxy tests a SOCKS5 proxy by making a connection
-func (c *Checker) testSOCKS5Proxy(ctx context.Context, proxy scraper.Proxy) (ProxyStatus, error) {
-	// Create a dialer that uses the SOCKS5 proxy
-	dialer, err := createSOCKSDialer(proxy.Host, proxy.Port)
-	if err != nil {
-		return StatusError, err
-	}
-
-	// Test by connecting to a simple HTTP endpoint through the SOCKS proxy
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.Dial(network, addr)
-		},
-		DisableKeepAlives:     true,
-		DisableCompression:    true,
-		MaxIdleConns:          0,
-		IdleConnTimeout:       1 * time.Second,
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   c.timeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	// Make a simple HTTP request through the SOCKS proxy
-	req, err := http.NewRequestWithContext(ctx, "GET", c.testURL, nil)
-	if err != nil {
-		return StatusError, err
-	}
-
-	req.Header.Set("User-Agent", c.userAgent)
-	req.Header.Set("Accept", "text/plain, application/json")
-	req.Header.Set("Connection", "close")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		if isTimeoutError(err) {
-			return StatusTimeout, err
-		}
-		if isConnectionError(err) {
-			return StatusUnhealthy, err
-		}
-		return StatusError, err
-	}
-	defer resp.Body.Close()
-
-	// Accept any 2xx status code
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return StatusHealthy, nil
-	}
-
-	return StatusUnhealthy, fmt.Errorf("HTTP %d", resp.StatusCode)
 }
 
 // createSOCKSDialer creates a dialer that uses a SOCKS5 proxy (works for most SOCKS4 too)

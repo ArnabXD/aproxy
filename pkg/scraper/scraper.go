@@ -11,32 +11,17 @@ type MultiScraper struct {
 }
 
 func NewMultiScraperWithConfig(config ScraperConfig) *MultiScraper {
+	enabled := make(map[string]bool, len(config.Sources))
+	for _, s := range config.Sources {
+		enabled[s] = true
+	}
+
 	var scrapers []Scraper
-
-	for _, source := range config.Sources {
-		switch source {
-		case "proxyscrape":
-			scrapers = append(scrapers, NewProxyScrapeAPIWithConfig(config))
-		case "freeproxylist":
-			scrapers = append(scrapers, NewFreeProxyListScraperWithConfig(config))
-		case "geonode":
-			scrapers = append(scrapers, NewGeonodeAPIScraperWithConfig(config))
-		case "proxylistorg":
-			scrapers = append(scrapers, NewProxyListOrgScraperWithConfig(config))
-		case "github":
-			scrapers = append(scrapers, NewGitHubProxyScraperWithConfig(config))
+	for _, src := range sources {
+		if len(enabled) == 0 || enabled[src.name] {
+			scrapers = append(scrapers, newListScraper(src, config))
 		}
 	}
-
-	if len(scrapers) == 0 {
-		scrapers = []Scraper{
-			NewProxyScrapeAPIWithConfig(config),
-			NewFreeProxyListScraperWithConfig(config),
-			NewGeonodeAPIScraperWithConfig(config),
-			NewGitHubProxyScraperWithConfig(config),
-		}
-	}
-	// ponytail: kept as a safety net for an empty/garbage Sources list; config already defaults it.
 
 	return &MultiScraper{
 		scrapers: scrapers,
@@ -47,7 +32,6 @@ func NewMultiScraperWithConfig(config ScraperConfig) *MultiScraper {
 func (m *MultiScraper) ScrapeAll(ctx context.Context) ([]Proxy, error) {
 	var allProxies []Proxy
 	seen := make(map[string]bool)
-	totalUnique := 0
 
 	for _, scraper := range m.scrapers {
 		proxies, err := scraper.Scrape(ctx)
@@ -56,20 +40,18 @@ func (m *MultiScraper) ScrapeAll(ctx context.Context) ([]Proxy, error) {
 			continue
 		}
 
-		uniqueCount := 0
+		unique := 0
 		for _, proxy := range proxies {
 			key := proxy.Address()
 			if !seen[key] {
 				seen[key] = true
 				allProxies = append(allProxies, proxy)
-				uniqueCount++
+				unique++
 			}
 		}
-
-		m.logger.InfoBg("Scraper %s: %d total, %d unique", scraper.Name(), len(proxies), uniqueCount)
-		totalUnique += uniqueCount
+		m.logger.InfoBg("Scraper %s: %d total, %d unique", scraper.Name(), len(proxies), unique)
 	}
 
-	m.logger.InfoBg("Total unique proxies collected: %d", totalUnique)
+	m.logger.InfoBg("Total unique proxies collected: %d", len(allProxies))
 	return allProxies, nil
 }

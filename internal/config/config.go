@@ -41,7 +41,7 @@ type ProxyConfig struct {
 type ScraperConfig struct {
 	Timeout   time.Duration `mapstructure:"timeout" validate:"required,min=5s,max=2m"`
 	UserAgent string        `mapstructure:"user_agent" validate:"required,min=10"`
-	Sources   []string      `mapstructure:"sources" validate:"required,min=1,dive,oneof=proxyscrape freeproxylist geonode proxylistorg github"`
+	Sources   []string      `mapstructure:"sources" validate:"required,min=1,dive,oneof=proxyscrape freeproxylist proxylistorg github"`
 }
 
 type CheckerConfig struct {
@@ -87,7 +87,7 @@ func setDefaults() {
 	// Scraper defaults
 	viper.SetDefault("scraper.timeout", "30s")
 	viper.SetDefault("scraper.user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	viper.SetDefault("scraper.sources", []string{"proxyscrape", "freeproxylist", "geonode", "github"})
+	viper.SetDefault("scraper.sources", []string{"proxyscrape", "freeproxylist", "github"})
 
 	// Checker defaults
 	viper.SetDefault("checker.test_url", "http://icanhazip.com")

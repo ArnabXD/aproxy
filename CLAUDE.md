@@ -65,10 +65,10 @@ docker-compose up
 
 ### Core Components
 
-- **Scraper** (`pkg/scraper/`): Fetches proxy lists from multiple sources (ProxyScrape, FreeProxyList, Geonode, ProxyListOrg, GitHub)
+- **Scraper** (`pkg/scraper/`): Fetches proxy lists from multiple sources (ProxyScrape, FreeProxyList, ProxyListOrg, GitHub)
 - **Checker** (`pkg/checker/`): Validates proxy health with SQLite caching, intelligent check intervals, and unified logging
 - **Manager** (`pkg/manager/`): Manages proxy pool with database persistence, in-memory cache, and auto-refresh
-- **Database** (`internal/database/`): SQLite-based persistent storage with Jet ORM for type-safe queries
+- **Database** (`internal/database/`): SQLite-based persistent storage with sqlc-generated type-safe queries
 - **Proxy Server** (`pkg/proxy/`): HTTP/HTTPS proxy server with privacy features
 - **Config** (`internal/config/`): Advanced configuration management with Viper and validation support
 
@@ -121,10 +121,9 @@ AProxy uses **Viper** for advanced configuration management with validation:
 3. **Config files**: YAML, JSON, TOML supported (searches `./`, `./config/`, `/etc/aproxy/`)
 4. **Defaults**: Sensible defaults for all settings
 
-**Supported Scraper Sources:**
+**Supported Scraper Sources:** (all are plain `host:port` / `proto://host:port` text lists)
 - `proxyscrape`: ProxyScrape API
 - `freeproxylist`: FreeProxyList scraper
-- `geonode`: Geonode API scraper  
 - `proxylistorg`: ProxyListOrg scraper
 - `github`: GitHub proxy list scraper (proxifly/free-proxy-list)
 
@@ -180,12 +179,13 @@ curl -x http://localhost:8080 \
 - `checker.test_url`: URL used to test proxy health (default: `http://icanhazip.com`)
 
 **Scraper Configuration Options:**
-- `scraper.sources`: List of proxy sources to use (default: `["proxyscrape", "freeproxylist", "geonode", "github"]`)
+- `scraper.sources`: List of proxy sources to use (default: `["proxyscrape", "freeproxylist", "github"]`)
 - `scraper.timeout`: Request timeout for scraping (default: `30s`)
 - `scraper.user_agent`: User agent string for scraper requests
 
 **Logging Configuration:**
-- Currently logs to stdout only in JSON format
+- Logs to stdout as JSON via `log/slog` (each line carries `component`, and `id` for correlated operations)
+- Level via `LOG_LEVEL` env var (`debug`/`info`/`warn`/`error`, default `info`)
 - Log level can be controlled via command line or environment variables
 - File-based logging is not yet implemented
 
@@ -215,45 +215,39 @@ The SQLite database includes:
 - **Indexes**: Optimized for fast lookups by host:port, status, and timestamps
 - **Automatic cleanup**: Removes old unhealthy proxies based on configuration
 
-## Recent Improvements
+## Extending the Codebase
 
-### GitHub Proxy Scraper (v1.2)
-- **New GitHub source**: Added scraper for proxifly/free-proxy-list GitHub repository
-- **Enhanced source variety**: Now supports 5 different proxy sources for better diversity
-- **Configuration validation**: Added `github` to allowed scraper sources in config validation
+### Adding a new proxy source
+Most sources are plain text lists, so you don't write a new file — add a row to the `sources` registry in `pkg/scraper/list.go`:
+1. Append a `source{name, urls, defaultType}` to the `sources` slice in `pkg/scraper/list.go`. `parseLine` already handles both `proto://host:port` and bare `host:port` lines.
+2. Add `<name>` to the `oneof=...` validator tag on `Scraper.Sources` in `internal/config/config.go` (otherwise config validation rejects it).
+3. Optionally add it to the `scraper.sources` default list in `setDefaults` (`internal/config/config.go`).
 
-### Logging System Improvements (v1.2)
-- **Unified logging**: Standardized all checker logging to use internal logger package
-- **Reduced verbosity**: Removed verbose individual proxy failure debugging output
-- **Consistent log levels**: Proper use of InfoBg/WarnBg throughout checker components
-- **Better performance**: Less logging overhead during proxy health checks
+For a non-text source (custom JSON API, etc.), implement the `Scraper` interface (`pkg/scraper/types.go`) in its own file and append an instance in `NewMultiScraperWithConfig`. `MultiScraper.ScrapeAll` runs all configured sources, dedups, and aggregates; the manager hands the result to the checker.
 
-### Configuration System (v1.1)
-- **Migrated to Viper**: Replaced manual config parsing with Viper library
-- **Added validation**: All config values validated using `go-playground/validator`
-- **YAML support**: Config files now use YAML format (JSON/TOML also supported)
-- **Better error messages**: Detailed validation errors with field names and constraints
+### Database queries are sqlc-generated
+- The data layer uses **sqlc** (`sqlc.yaml`). SQL lives in `internal/database/schema.sql` (table defs) and `internal/database/query.sql` (named queries). Run `sqlc generate` to regenerate `internal/database/db/` — do not hand-edit those generated files.
+- `internal/database/service.go` wraps the generated `db.Queries` with the methods the app calls. The one hand-written query is `GetProxiesByAddresses` (sqlc's sqlite engine can't do `sqlc.slice()` IN-lists).
+- ⚠️ The schema lives in **two** places that must stay in sync: `schema.sql` (read by sqlc) and the inline string in `db.go`'s `initSchema()` (run at startup). Change both.
 
-### Docker Support
-- **Production-ready**: Multi-stage Docker build with Alpine Linux
-- **Security**: Non-root user, minimal attack surface
-- **Health checks**: Proper health endpoint with curl-based Docker healthchecks
-- **Persistent volumes**: Database and logs stored in `./data/` for volume mounting
-- **Resource limits**: CPU and memory constraints in docker-compose
+### Logging conventions
+Use the internal `logger` package (`internal/logger/logger.go`), not the standard `log`, for component logging:
+- `logger.New("<component>")` creates a component-scoped logger.
+- ID-tagged methods (`Info`/`Warn`/`Error`/`Debug`) take a request/operation ID from `logger.GenerateID()` to correlate a multi-step operation's log lines.
+- `*Bg` variants (`InfoBg`/`WarnBg`/`ErrorBg`/`DebugBg`) are for background/non-correlated operations — used throughout the checker.
 
-### Performance Optimizations
-- **Non-blocking architecture**: Server starts immediately, proxy checking happens in background
-- **Progressive checking**: Proxies checked in small batches with delays to reduce system load
-- **Intelligent caching**: Only checks proxies older than 10 minutes, persists all results including failures
-- **Fixed race conditions**: HTTPS CONNECT bidirectional copying now uses channel coordination
-- **Batch database updates**: Replaced concurrent individual updates with single transaction batches
-- **Removed GitHub sources**: Eliminated high-volume proxy sources to reduce database load
-- **Improved caching**: Better SQLite connection pooling and prepared statements
+## Request Flow
+
+1. `main.go` loads config (Viper) → opens SQLite DB → builds `scraper.ScraperConfig` and `checker.CheckerConfig`.
+2. `manager.NewDBManagerWithConfig` wires together the multi-scraper, the DB-backed checker, and the in-memory cache; `mgr.Start(updateInterval)` launches background refresh.
+3. `RefreshProxies` (manager) calls `scraper.ScrapeAll` → `dbChecker.CheckProxiesWithCaching` (skips proxies checked within `check_interval`) → persists results to SQLite → reloads the healthy in-memory cache.
+4. `proxy.NewServer(mgr, cfg)` serves requests; `GetNextProxy`/`GetRandomProxy` pull from the cache, `ReportProxyFailure` feeds failures back.
+5. Server starts immediately on cached proxies — the pool fills progressively in the background (non-blocking startup).
 
 ### Key Dependencies
 - `github.com/spf13/viper`: Configuration management
 - `github.com/go-playground/validator/v10`: Configuration validation
-- `github.com/go-jet/jet/v2`: Type-safe SQL queries
+- `sqlc` (build-time, not a runtime dep): generates the type-safe query layer in `internal/database/db/`
 - `modernc.org/sqlite`: Pure Go SQLite driver
 
 ## Development Notes

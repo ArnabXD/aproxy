@@ -18,16 +18,6 @@ type GitHubProxyScraper struct {
 	logger    *logger.Logger
 }
 
-func NewGitHubProxyScraper() *GitHubProxyScraper {
-	return &GitHubProxyScraper{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-		logger:    logger.New("github"),
-	}
-}
-
 func NewGitHubProxyScraperWithConfig(config ScraperConfig) *GitHubProxyScraper {
 	return &GitHubProxyScraper{
 		client: &http.Client{

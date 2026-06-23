@@ -10,18 +10,6 @@ type MultiScraper struct {
 	logger   *logger.Logger
 }
 
-func NewMultiScraper() *MultiScraper {
-	return &MultiScraper{
-		scrapers: []Scraper{
-			NewProxyScrapeAPI(),
-			NewFreeProxyListScraper(),
-			NewGeonodeAPIScraper(),
-			NewGitHubProxyScraper(),
-		},
-		logger: logger.New("multiscraper"),
-	}
-}
-
 func NewMultiScraperWithConfig(config ScraperConfig) *MultiScraper {
 	var scrapers []Scraper
 
@@ -48,6 +36,7 @@ func NewMultiScraperWithConfig(config ScraperConfig) *MultiScraper {
 			NewGitHubProxyScraperWithConfig(config),
 		}
 	}
+	// ponytail: kept as a safety net for an empty/garbage Sources list; config already defaults it.
 
 	return &MultiScraper{
 		scrapers: scrapers,

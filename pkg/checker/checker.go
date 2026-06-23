@@ -64,16 +64,6 @@ type CheckerConfig struct {
 	UserAgent  string
 }
 
-func NewChecker() *Checker {
-	return &Checker{
-		testURL:    "http://httpbin.org/ip",
-		timeout:    20 * time.Second,
-		maxWorkers: 20,
-		userAgent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-		logger:     logger.New("checker"),
-	}
-}
-
 func NewCheckerWithConfig(config CheckerConfig) *Checker {
 	return &Checker{
 		testURL:    config.TestURL,
@@ -82,18 +72,6 @@ func NewCheckerWithConfig(config CheckerConfig) *Checker {
 		userAgent:  config.UserAgent,
 		logger:     logger.New("checker"),
 	}
-}
-
-func (c *Checker) SetTestURL(url string) {
-	c.testURL = url
-}
-
-func (c *Checker) SetTimeout(timeout time.Duration) {
-	c.timeout = timeout
-}
-
-func (c *Checker) SetMaxWorkers(workers int) {
-	c.maxWorkers = workers
 }
 
 func (c *Checker) CheckProxy(ctx context.Context, proxy scraper.Proxy) CheckResult {
@@ -282,24 +260,6 @@ func FilterHealthyProxies(results []CheckResult) []scraper.Proxy {
 	return healthy
 }
 
-func GetHealthyCount(results []CheckResult) int {
-	count := 0
-	for _, result := range results {
-		if result.Status == StatusHealthy {
-			count++
-		}
-	}
-	return count
-}
-
-func GroupByStatus(results []CheckResult) map[ProxyStatus][]CheckResult {
-	groups := make(map[ProxyStatus][]CheckResult)
-	for _, result := range results {
-		groups[result.Status] = append(groups[result.Status], result)
-	}
-	return groups
-}
-
 // testSOCKSProxy tests SOCKS4 and SOCKS5 proxies
 func (c *Checker) testSOCKSProxy(ctx context.Context, proxy scraper.Proxy) (ProxyStatus, error) {
 	// For SOCKS proxies, we'll test by establishing a connection and making a simple HTTP request
@@ -443,24 +403,4 @@ func createSOCKSDialer(host string, port int) (netproxy.Dialer, error) {
 		return nil, fmt.Errorf("failed to create SOCKS dialer: %w", err)
 	}
 	return dialer, nil
-}
-
-// TestSingleProxy tests a single proxy manually (for debugging)
-func TestSingleProxy(host string, port int) {
-	proxy := scraper.Proxy{
-		Host: host,
-		Port: port,
-		Type: "http",
-	}
-
-	checker := NewChecker()
-	ctx := context.Background()
-
-	checker.logger.InfoBg("Testing proxy %s:%d", host, port)
-	result := checker.CheckProxy(ctx, proxy)
-
-	checker.logger.InfoBg("Result: %s (took %v)", result.Status.String(), result.ResponseTime)
-	if result.Error != nil {
-		checker.logger.WarnBg("Error: %v", result.Error)
-	}
 }

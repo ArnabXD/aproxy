@@ -21,7 +21,7 @@ import (
 )
 
 type Server struct {
-	manager     manager.ProxyManager
+	manager     *manager.DBManager
 	server      *http.Server
 	config      *Config
 	stats       *Stats
@@ -51,7 +51,7 @@ type Stats struct {
 	mu                sync.RWMutex
 }
 
-func NewServer(mgr manager.ProxyManager, config *Config) *Server {
+func NewServer(mgr *manager.DBManager, config *Config) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -572,12 +572,10 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	managerStats := s.manager.GetStats()
 	serverStats := s.getStats()
 
-	// Try to get database stats if this is a DBManager
+	// Try to get database stats
 	dbStatsJSON := `"not_available"`
-	if dbManager, ok := s.manager.(*manager.DBManager); ok {
-		if dbStats, err := dbManager.GetDBStats(context.Background()); err == nil {
-			dbStatsJSON = fmt.Sprintf(`{"total_in_db": %d, "healthy_in_db": %d, "by_type": %s}`, dbStats.Total, dbStats.Healthy, formatMap(dbStats.ByType))
-		}
+	if dbStats, err := s.manager.GetDBStats(context.Background()); err == nil {
+		dbStatsJSON = fmt.Sprintf(`{"total_in_db": %d, "healthy_in_db": %d, "by_type": %s}`, dbStats.Total, dbStats.Healthy, formatMap(dbStats.ByType))
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -616,14 +614,7 @@ func (s *Server) handleProxies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get healthy proxies from manager
-	var proxies []scraper.Proxy
-	if dbManager, ok := s.manager.(*manager.DBManager); ok {
-		proxies = dbManager.GetHealthyProxies()
-	} else {
-		http.Error(w, "Proxy list not available", http.StatusServiceUnavailable)
-		return
-	}
+	proxies := s.manager.GetHealthyProxies()
 
 	if len(proxies) == 0 {
 		http.Error(w, "No healthy proxies available", http.StatusServiceUnavailable)

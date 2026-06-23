@@ -38,16 +38,6 @@ type GeonodeProxy struct {
 	UpdatedAt      string   `json:"updated_at"`
 }
 
-func NewGeonodeAPIScraper() *GeonodeAPIScraper {
-	return &GeonodeAPIScraper{
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
-		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-		logger:    logger.New("geonode"),
-	}
-}
-
 func NewGeonodeAPIScraperWithConfig(config ScraperConfig) *GeonodeAPIScraper {
 	return &GeonodeAPIScraper{
 		client: &http.Client{

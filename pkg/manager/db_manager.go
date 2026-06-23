@@ -13,6 +13,14 @@ import (
 	"aproxy/pkg/scraper"
 )
 
+// Stats summarizes the in-memory proxy pool.
+type Stats struct {
+	TotalProxies int
+	HealthyCount int
+	TypeCount    map[string]int
+	CountryCount map[string]int
+}
+
 // DBManager is a manager that uses SQLite for persistent proxy storage
 type DBManager struct {
 	scraper      *scraper.MultiScraper

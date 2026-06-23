@@ -18,16 +18,6 @@ type ProxyScrapeAPI struct {
 	logger    *logger.Logger
 }
 
-func NewProxyScrapeAPI() *ProxyScrapeAPI {
-	return &ProxyScrapeAPI{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-		logger:    logger.New("proxyscrape"),
-	}
-}
-
 func NewProxyScrapeAPIWithConfig(config ScraperConfig) *ProxyScrapeAPI {
 	return &ProxyScrapeAPI{
 		client: &http.Client{

@@ -19,16 +19,6 @@ type FreeProxyListScraper struct {
 	logger    *logger.Logger
 }
 
-func NewFreeProxyListScraper() *FreeProxyListScraper {
-	return &FreeProxyListScraper{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-		logger:    logger.New("freeproxylist"),
-	}
-}
-
 func NewFreeProxyListScraperWithConfig(config ScraperConfig) *FreeProxyListScraper {
 	return &FreeProxyListScraper{
 		client: &http.Client{

@@ -18,16 +18,6 @@ type ProxyListOrgScraper struct {
 	logger    *logger.Logger
 }
 
-func NewProxyListOrgScraper() *ProxyListOrgScraper {
-	return &ProxyListOrgScraper{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-		logger:    logger.New("proxylistorg"),
-	}
-}
-
 func NewProxyListOrgScraperWithConfig(config ScraperConfig) *ProxyListOrgScraper {
 	return &ProxyListOrgScraper{
 		client: &http.Client{

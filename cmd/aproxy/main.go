@@ -22,9 +22,8 @@ var (
 	version    = flag.Bool("version", false, "Show version")
 )
 
-var (
-	Version = "1.0.0"
-)
+// Version is set at build time via -ldflags "-X main.Version=...".
+var Version = "dev"
 
 const (
 	Banner = `
@@ -42,7 +41,7 @@ ______ ______ ______ ______ ______ ______ ______ ______
                                                ░ ░     
 ______ ______ ______ ______ ______ ______ ______ ______
 
-AProxy - Anonymous Proxy Server v%s
+AProxy - Anonymous Proxy Server %s
 https://github.com/ArnabXD/aproxy
 
 ______ ______ ______ ______ ______ ______ ______ ______
@@ -54,7 +53,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("AProxy v%s\n", Version)
+		fmt.Printf("AProxy %s\n", Version)
 		return
 	}
 
@@ -75,7 +74,7 @@ func main() {
 		log.Fatal("Failed to load config: %v", err)
 	}
 
-	log.InfoBg("Starting AProxy v%s", Version)
+	log.InfoBg("Starting AProxy %s", Version)
 	config.PrintConfig(cfg)
 
 	// Initialize database

@@ -75,7 +75,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: "1.21"
+          go-version: "1.24"
           check-latest: true
           cache: false
 
@@ -91,7 +91,7 @@ jobs:
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: 0
         run: |
-          go build -ldflags="-s -w" -o ${{ matrix.binary_name }} ./cmd/aproxy
+          go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o ${{ matrix.binary_name }} ./cmd/aproxy
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
